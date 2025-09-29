@@ -24,7 +24,7 @@ import argparse
 import logging
 import os
 
-from models import SiT_models
+from model import STAGE2_ARCHS
 from download import find_model
 from transport import create_transport, Sampler
 from diffusers.models import AutoencoderKL
@@ -147,7 +147,7 @@ def main(args):
     # Create model:
     assert args.image_size % 8 == 0, "Image size must be divisible by 8 (for the VAE encoder)."
     latent_size = args.image_size // 8
-    model = SiT_models[args.model](
+    model = STAGE2_ARCHS[args.model](
         input_size=latent_size,
         num_classes=args.num_classes
     )

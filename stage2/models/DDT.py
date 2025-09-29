@@ -140,8 +140,6 @@ class LightningDDTBlock(nn.Module):
             shift_mlp = None
         else:
             shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(6, dim=-1)
-        # x = x + gate_msa * self.attn(DDTModulate(self.norm1(x), shift_msa, scale_msa), rope=feat_rope)
-        # x = x + gate_mlp * self.mlp(DDTModulate(self.norm2(x), shift_mlp, scale_mlp))
         x = x + DDTGate(self.attn(DDTModulate(self.norm1(x), shift_msa, scale_msa), rope=feat_rope), gate_msa)
         x = x + DDTGate(self.mlp(DDTModulate(self.norm2(x), shift_mlp, scale_mlp)), gate_mlp)
         return x

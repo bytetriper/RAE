@@ -1,4 +1,3 @@
-from .models import STAGE2_ARCHS
 from .models.lightningDiT import LightningDiT
 from .models.DDT import DiTwDDTHead
 from typing import Callable, Dict, Optional, Type, Union
