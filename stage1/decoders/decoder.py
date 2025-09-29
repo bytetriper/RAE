@@ -689,7 +689,7 @@ class GeneralDecoder(nn.Module):
     ):
         # embed tokens
         x = self.decoder_embed(hidden_states)
-        print(f"x.shape = {x.shape}")
+        #print(f"x.shape = {x.shape}")
         if drop_cls_token:
             x_ = x[:, 1:, :]  # no cls token
             x_ = self.interpolate_latent(x_)
@@ -704,7 +704,7 @@ class GeneralDecoder(nn.Module):
         else:
             decoder_pos_embed = self.decoder_pos_embed
         hidden_states = x + decoder_pos_embed
-        print(f"hidden_states.shape = {hidden_states.shape}")
+        #print(f"hidden_states.shape = {hidden_states.shape}")
         # apply Transformer layers (blocks)
         all_hidden_states = () if output_hidden_states else None
         all_self_attentions = () if output_attentions else None

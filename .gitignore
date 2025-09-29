@@ -5,3 +5,7 @@ wandb
 samples
 results
 pretrained_models
+
+models/
+**/
+__pycache__/

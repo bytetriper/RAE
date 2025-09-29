@@ -2,6 +2,7 @@ import os
 import sys
 import torch
 from torch import nn
+from tqdm import tqdm
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 from stage1 import RAE
@@ -39,12 +40,12 @@ def stage2_instance() -> DiTwDDTHead:
 def load_stage2_weights(model: nn.Module, path: str):
     if os.path.isfile(path):
         state_dict = torch.load(path, map_location='cpu')
-        model.load_state_dict(state_dict)
+        model.load_state_dict(state_dict, strict=True)
         print(f"Loaded stage 2 model weights from {path}")
     else:
         raise FileNotFoundError(f"No checkpoint found at {path}")
 
-def test_stage2_forward(on_cuda: bool = True):
+def single_stage2_model_inference(on_cuda: bool = True):
     if on_cuda and torch.cuda.is_available():
         torch.cuda.set_device(0)
         print("Using GPU")
@@ -58,23 +59,32 @@ def test_stage2_forward(on_cuda: bool = True):
     stage2_model.eval()
     load_stage2_weights(stage2_model, 'models/DiTs/Dinov2/wReg_base/DDTXL/stage2_model.pt')  # Update with actual path
     x = get_default_img().to(device)  # Use the default image
+    import numpy as np
+    sampler_timesteps = np.linspace(1/1000, 1, 50)
+    shift_ratio = 1/ 0.14433756729740643
+    sampler_timesteps = sampler_timesteps * shift_ratio / (1 + (shift_ratio - 1) * sampler_timesteps)
+    sampler_timesteps = sampler_timesteps.tolist()
     with torch.no_grad():
         z = stage1_model.encode(x)
-        t = torch.linspace(0.05, 0.998, steps=100).to(device)  # Dummy timestep
-        #y = torch.linspace(0, 999, steps=100).long().to(device)  # Dummy class labels
-        #y is int
-        y = torch.zeros(100, dtype=torch.long).to(device)  # Dummy class labels
-        t = t.repeat(z.size(0))
-        y = y.repeat(z.size(0))
-        z = z.repeat_interleave(100, dim=0)  # Repeat latent for each timestep
-        x_end = torch.randn_like(z)  # Random noise as starting point
-        print("z shape:", z.shape, "t shape:", t.shape, "y shape:", y.shape, "x_end shape:", x_end.shape)
-        zt = (1 - t.view(-1, 1, 1, 1)) * z + t.view(-1, 1, 1, 1) * x_end  # Add noise based on timestep
-        out = stage2_model(zt, t, y)
-        eps_pred = x_end - z
-        mse_loss = ((out - eps_pred) ** 2).mean()
-    print("Stage 2 forward pass successful with output shape:", out.shape, "and latent shape:", z.shape)
-    print(f"Dummy MSE Loss: {mse_loss.item():.6f}")
-
+        x_end = torch.randn_like(z).to(device)  # Random input
+        zt = x_end
+        y = torch.ones(z.size(0), dtype=torch.long).to(device)*250  # Dummy class labels
+        tbar = tqdm(reversed(range(1, len(sampler_timesteps))), desc='Sampling', total = len(sampler_timesteps)-1)
+        for i in tbar:
+            u_t = torch.tensor(sampler_timesteps[i]).to(device).repeat(z.size(0))
+            u_s = torch.tensor(sampler_timesteps[i - 1]).to(device).repeat(z.size(0))
+            #print("u_t:", u_t, "u_s:", u_s)
+            sigma_t, sigma_s = u_t, u_s
+            v_pred = stage2_model(zt, u_t, y)
+            delta_t = sigma_s - sigma_t
+            delta_t = delta_t.view(-1, 1, 1, 1).to(device)
+            zt = zt + delta_t * v_pred
+        out = zt
+    x_inference = stage1_model.decode(out)
+    print("Stage 2 single model inference successful with output shape:", x_inference.shape, x_inference.min(), x_inference.max())
+    # save output image
+    out_img = transforms.ToPILImage()(x_inference.squeeze(0).clamp(0, 1))
+    out_img.save("assets/stage2_inference.png")
+    print("Saved inference image to assets/stage2_inference.png")
 if __name__ == "__main__":
-    test_stage2_forward(on_cuda=True)
+    single_stage2_model_inference(on_cuda=True)
