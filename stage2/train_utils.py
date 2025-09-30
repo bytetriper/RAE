@@ -9,7 +9,7 @@ def parse_transport_args(parser):
     group.add_argument("--prediction", type=str, default="velocity", choices=["velocity", "score", "noise"])
     group.add_argument("--loss-weight", type=none_or_str, default=None, choices=[None, "velocity", "likelihood"])
     group.add_argument("--time-dist-type", type=str, default="uniform")
-    group.add_argument("--time-dist-shift", type=float, default=1.0)
+    group.add_argument("--time-dist-shift", type=float, default=1/ 0.14433756729740643)
     group.add_argument("--sample-eps", type=float)
     group.add_argument("--train-eps", type=float)
 

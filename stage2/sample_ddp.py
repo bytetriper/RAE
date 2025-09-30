@@ -8,13 +8,15 @@ evaluation metrics via the ADM repo: https://github.com/openai/guided-diffusion/
 
 For a simple single-GPU/CPU sampling script, see sample.py.
 """
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 import torch.distributed as dist
 from download import find_model
 from stage1 import RAE
 from stage2.model import STAGE2_ARCHS, DiTwDDTHead
 from transport import create_transport, Sampler
-from diffusers.models import AutoencoderKL
 from train_utils import parse_ode_args, parse_sde_args, parse_transport_args
 from tqdm import tqdm
 import os
@@ -192,8 +194,8 @@ def main(mode, args):
         if using_cfg:
             samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
 
-        samples = rae.decode(samples)
-        samples = torch.clamp(127.5 * samples + 128.0, 0, 255).permute(0, 2, 3, 1).to("cpu", dtype=torch.uint8).numpy()
+        samples = rae.decode(samples).clamp(0, 1).mul(255).permute(0, 2, 3, 1).to("cpu", dtype=torch.uint8).numpy()
+        #samples = torch.clamp(127.5 * samples + 128.0, 0, 255).permute(0, 2, 3, 1).to("cpu", dtype=torch.uint8).numpy()
 
         # Save samples to disk as individual .png files
         for i, sample in enumerate(samples):
@@ -225,7 +227,6 @@ if __name__ == "__main__":
     assert mode in ["ODE", "SDE"], "Invalid mode. Please choose 'ODE' or 'SDE'"
 
     parser.add_argument("--model", type=str, default="DDTXL")
-    parser.add_argument("--vae",  type=str, choices=["ema", "mse"], default="ema")
     parser.add_argument("--sample-dir", type=str, default="samples")
     parser.add_argument("--per-proc-batch-size", type=int, default=4)
     parser.add_argument("--num-fid-samples", type=int, default=50_000)
@@ -238,7 +239,6 @@ if __name__ == "__main__":
                         help="By default, use TF32 matmuls. This massively accelerates sampling on Ampere GPUs.")
     parser.add_argument("--ckpt", type=str, default=None,
                         help="Optional path to a SiT checkpoint (default: auto-download a pre-trained SiT-XL/2 model).")
-
     parse_transport_args(parser)
     if mode == "ODE":
         parse_ode_args(parser)

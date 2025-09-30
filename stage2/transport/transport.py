@@ -175,8 +175,8 @@ class Transport:
 
         t = t.to(x1)
 
-        sqrt_size_ratio = 1 / self.time_dist_shift # already sqrted
-        t = sqrt_size_ratio * t / (1 + (sqrt_size_ratio - 1) * t)
+        #sqrt_size_ratio = 1 / self.time_dist_shift # already sqrted
+        t = self.time_dist_shift * t / (1 + (self.time_dist_shift - 1) * t)
         return t, x0, x1
     
 
