@@ -13,7 +13,7 @@ class Dinov2withNorm(nn.Module):
         normalize: bool = True,
     ):
         super().__init__()
-        self.encoder = Dinov2WithRegistersModel.from_pretrained(dinov2_path)
+        self.encoder = Dinov2WithRegistersModel.from_pretrained(dinov2_path, local_files_only=True)
         self.encoder.requires_grad_(False)
         if normalize:
             self.encoder.layernorm.elementwise_affine = False

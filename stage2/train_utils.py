@@ -23,7 +23,7 @@ def parse_ode_args(parser):
 
 def parse_sde_args(parser):
     group = parser.add_argument_group("SDE arguments")
-    group.add_argument("--sampling-method", type=str, default="Euler", choices=["Euler", "Heun"])
+    group.add_argument("--sampling-method", type=str, default="euler", choices=["euler", "heun"])
     group.add_argument("--diffusion-form", type=str, default="sigma", \
                         choices=["constant", "SBDM", "sigma", "linear", "decreasing", "increasing-decreasing"],\
                         help="form of diffusion coefficient in the SDE")

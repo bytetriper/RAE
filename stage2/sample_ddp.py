@@ -10,8 +10,9 @@ For a simple single-GPU/CPU sampling script, see sample.py.
 """
 import torch
 import torch.distributed as dist
-from models import SiT_models
 from download import find_model
+from stage1 import RAE
+from stage2.model import STAGE2_ARCHS, DiTwDDTHead
 from transport import create_transport, Sampler
 from diffusers.models import AutoencoderKL
 from train_utils import parse_ode_args, parse_sde_args, parse_transport_args
@@ -58,21 +59,23 @@ def main(mode, args):
     torch.cuda.set_device(device)
     print(f"Starting rank={rank}, seed={seed}, world_size={dist.get_world_size()}.")
 
+    # TODO: setup DDTXL ckpt auto-downloads
     if args.ckpt is None:
-        assert args.model == "SiT-XL/2", "Only SiT-XL/2 models are available for auto-download."
+        assert args.model == "DDTXL", "Only DDTXL models are available for auto-download."
         assert args.image_size in [256, 512]
         assert args.num_classes == 1000
-        assert args.image_size == 256, "512x512 models are not yet available for auto-download." # remove this line when 512x512 models are available
+        # assert args.image_size == 256, "512x512 models are not yet available for auto-download." # remove this line when 512x512 models are available
         learn_sigma = args.image_size == 256
     else:
         learn_sigma = False
 
     # Load model:
-    latent_size = args.image_size // 8
-    model = SiT_models[args.model](
-        input_size=latent_size,
-        num_classes=args.num_classes,
-        learn_sigma=learn_sigma,
+    # TODO: args set downsample rate
+    latent_size = args.image_size // 16
+    # TODO: set token_dim & model input size
+    model = STAGE2_ARCHS[args.model](
+        token_dim=768,  # Assuming the latent token dimension from stage 1
+        input_size=16,  # Assuming the latent size from stage 1 is 32x32 for 256x256 input
     ).to(device)
     # Auto-download a pre-trained model or load a custom SiT checkpoint from train.py:
     ckpt_path = args.ckpt or f"SiT-XL-2-{args.image_size}x{args.image_size}.pt"
@@ -85,11 +88,11 @@ def main(mode, args):
         args.path_type,
         args.prediction,
         args.loss_weight,
+        args.train_eps,
+        args.sample_eps,
         args.time_dist_type,
         args.time_dist_shift,
-        args.train_eps,
-        args.sample_eps
-    ) 
+    )
     sampler = Sampler(transport)
     if mode == "ODE":
         if args.likelihood:
@@ -117,7 +120,20 @@ def main(mode, args):
             last_step_size=args.last_step_size,
             num_steps=args.num_sampling_steps,
         )
-    vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
+    
+    # TODO: update RAE hardcoded load
+    rae = RAE(
+        encoder_cls='Dinov2withNorm',
+        encoder_config_path='models/encoders/dinov2/wReg_base',
+        encoder_input_size=224,
+        encoder_params={'dinov2_path': 'models/encoders/dinov2/wReg_base', 'normalize': True},
+        decoder_config_path='configs/decoder/ViTXL',
+        pretrained_decoder_path='models/decoders/dinov2/wReg_base/ViTXL_n08/model.pt',
+        noise_tau=0.,
+        reshape_to_2d=True,   
+        normalization_stat_path='models/stats/dinov2/wReg_base/imagenet1k/stat.pt',
+    ).to(device)
+    rae.eval()
     assert args.cfg_scale >= 1.0, "In almost all cases, cfg_scale be >= 1.0"
     using_cfg = args.cfg_scale > 1.0
 
@@ -176,7 +192,7 @@ def main(mode, args):
         if using_cfg:
             samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
 
-        samples = vae.decode(samples / 0.18215).sample
+        samples = rae.decode(samples)
         samples = torch.clamp(127.5 * samples + 128.0, 0, 255).permute(0, 2, 3, 1).to("cpu", dtype=torch.uint8).numpy()
 
         # Save samples to disk as individual .png files
@@ -208,7 +224,7 @@ if __name__ == "__main__":
     assert mode[:2] != "--", "Usage: program.py <mode> [options]"
     assert mode in ["ODE", "SDE"], "Invalid mode. Please choose 'ODE' or 'SDE'"
 
-    parser.add_argument("--model", type=str, choices=list(SiT_models.keys()), default="SiT-XL/2")
+    parser.add_argument("--model", type=str, default="DDTXL")
     parser.add_argument("--vae",  type=str, choices=["ema", "mse"], default="ema")
     parser.add_argument("--sample-dir", type=str, default="samples")
     parser.add_argument("--per-proc-batch-size", type=int, default=4)

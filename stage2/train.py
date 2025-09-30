@@ -24,7 +24,8 @@ import argparse
 import logging
 import os
 
-from model import STAGE2_ARCHS
+from stage1 import RAE
+from stage2.model import STAGE2_ARCHS, DiTwDDTHead
 from download import find_model
 from transport import create_transport, Sampler
 from diffusers.models import AutoencoderKL
@@ -145,8 +146,8 @@ def main(args):
         logger = create_logger(None)
 
     # Create model:
-    assert args.image_size % 8 == 0, "Image size must be divisible by 8 (for the VAE encoder)."
-    latent_size = args.image_size // 8
+    assert args.image_size % 16 == 0, "Image size must be divisible by 8 (for the RAE encoder)."
+    latent_size = args.image_size // 16
     model = STAGE2_ARCHS[args.model](
         input_size=latent_size,
         num_classes=args.num_classes
@@ -170,13 +171,26 @@ def main(args):
         args.path_type,
         args.prediction,
         args.loss_weight,
+        args.train_eps,
+        args.sample_eps,
         args.time_dist_type,
         args.time_dist_shift,
-        args.train_eps,
-        args.sample_eps
     )  # default: velocity; 
     transport_sampler = Sampler(transport)
-    vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
+
+    rae = RAE(
+        encoder_cls='Dinov2withNorm',
+        encoder_config_path='models/encoders/dinov2/wReg_base',
+        encoder_input_size=224,
+        encoder_params={'dinov2_path': 'models/encoders/dinov2/wReg_base', 'normalize': True},
+        decoder_config_path='configs/decoder/ViTXL',
+        pretrained_decoder_path='models/decoders/dinov2/wReg_base/ViTXL_n08/model.pt',
+        noise_tau=0.,
+        reshape_to_2d=True,   
+        normalization_stat_path='models/stats/dinov2/wReg_base/imagenet1k/stat.pt',
+    ).to(device)
+    rae.eval()
+
     logger.info(f"SiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
@@ -246,7 +260,7 @@ def main(args):
             y = y.to(device)
             with torch.no_grad():
                 # Map input images to latent space + normalize latents:
-                x = vae.encode(x).latent_dist.sample().mul_(0.18215)
+                x = rae.encode(x)
             model_kwargs = dict(y=y)
             loss_dict = transport.training_losses(model, x, model_kwargs)
             loss = loss_dict["loss"].mean()
@@ -301,7 +315,7 @@ def main(args):
 
                 if use_cfg: #remove null samples
                     samples, _ = samples.chunk(2, dim=0)
-                samples = vae.decode(samples / 0.18215).sample
+                samples = rae.decode(samples)
                 out_samples = torch.zeros((args.global_batch_size, 3, args.image_size, args.image_size), device=device)
                 dist.all_gather_into_tensor(out_samples, samples)
                 if args.wandb:
@@ -320,7 +334,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-path", type=str, required=True)
     parser.add_argument("--results-dir", type=str, default="results")
-    parser.add_argument("--model", type=str, choices=list(SiT_models.keys()), default="SiT-XL/2")
+    parser.add_argument("--model", type=str, default="DDTXL")
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--epochs", type=int, default=1400)

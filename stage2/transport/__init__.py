@@ -6,6 +6,8 @@ def create_transport(
     loss_weight=None,
     train_eps=None,
     sample_eps=None,
+    time_dist_type="uniform",
+    time_dist_shift=1.0,
 ):
     """function for creating Transport object
     **Note**: model prediction defaults to velocity
@@ -17,6 +19,8 @@ def create_transport(
     - likelihood_weighted: weight loss by likelihood weight
     - train_eps: small epsilon for avoiding instability during training
     - sample_eps: small epsilon for avoiding instability during sampling
+    - time_dist_type: type of time distribution to use; default to uniform
+    - time_dist_shift: shift for time distribution; default to 1.0
     """
 
     if prediction == "noise":
@@ -56,6 +60,8 @@ def create_transport(
         model_type=model_type,
         path_type=path_type,
         loss_type=loss_type,
+        time_dist_type=time_dist_type,
+        time_dist_shift=time_dist_shift,
         train_eps=train_eps,
         sample_eps=sample_eps,
     )

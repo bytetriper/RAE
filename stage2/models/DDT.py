@@ -349,6 +349,7 @@ class DiTwDDTHead(nn.Module):
         half = x[: len(x) // 2]
         combined = torch.cat([half, half], dim=0)
         model_out = self.forward(combined, t, y)
+        # TODO: this is undefined
         if self.ssl_supervise:
             model_out = model_out[0] # take the output only
         # For exact reproducibility reasons, we apply classifier-free guidance on only

@@ -30,7 +30,7 @@ class sde:
         w_cur = th.randn(x.size()).to(x)
         t = th.ones(x.size(0)).to(x) * t
         dw = w_cur * th.sqrt(self.dt)
-        drift = self.drift(x, t, model, **model_kwargs)
+        drift = -self.drift(x, 1 - t, model, **model_kwargs)
         diffusion = self.diffusion(x, t)
         mean_x = x + drift * self.dt
         x = mean_x + th.sqrt(2 * diffusion) * dw
@@ -42,16 +42,16 @@ class sde:
         t_cur = th.ones(x.size(0)).to(x) * t
         diffusion = self.diffusion(x, t_cur)
         xhat = x + th.sqrt(2 * diffusion) * dw
-        K1 = self.drift(xhat, t_cur, model, **model_kwargs)
+        K1 = -self.drift(xhat, 1 - t_cur, model, **model_kwargs)
         xp = xhat + self.dt * K1
-        K2 = self.drift(xp, t_cur + self.dt, model, **model_kwargs)
+        K2 = -self.drift(xp, 1 - (t_cur + self.dt), model, **model_kwargs)
         return xhat + 0.5 * self.dt * (K1 + K2), xhat # at last time point we do not perform the heun step
 
     def __forward_fn(self):
         """TODO: generalize here by adding all private functions ending with steps to it"""
         sampler_dict = {
-            "Euler": self.__Euler_Maruyama_step,
-            "Heun": self.__Heun_step,
+            "euler": self.__Euler_Maruyama_step,
+            "heun": self.__Heun_step,
         }
 
         try:
@@ -100,8 +100,9 @@ class ode:
         device = x[0].device if isinstance(x, tuple) else x.device
         def _fn(t, x):
             t = th.ones(x[0].size(0)).to(device) * t if isinstance(x, tuple) else th.ones(x.size(0)).to(device) * t
+            t = 1 - t
             model_output = self.drift(x, t, model, **model_kwargs)
-            return model_output
+            return -model_output
 
         t = self.t.to(device)
         atol = [self.atol] * len(x) if isinstance(x, tuple) else [self.atol]
