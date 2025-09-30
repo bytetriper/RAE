@@ -28,7 +28,6 @@ from stage1 import RAE
 from stage2.model import STAGE2_ARCHS, DiTwDDTHead
 from download import find_model
 from transport import create_transport, Sampler
-from diffusers.models import AutoencoderKL
 from train_utils import parse_transport_args
 import wandb_utils
 
