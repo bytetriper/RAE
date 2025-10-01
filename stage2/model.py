@@ -59,6 +59,21 @@ def DDTXL(token_dim: int, input_size: int) -> DiTwDDTHead:
     )
     return model
 
+@register_stage2()
+def DDTS(token_dim: int, input_size: int) -> DiTwDDTHead:
+    model = DiTwDDTHead(
+        input_size=input_size,
+        patch_size=1,
+        in_channels=token_dim,
+        hidden_size=[384, 2048],
+        depth=[12, 2],
+        num_heads=[6, 16],
+        mlp_ratio=4.0,
+        class_dropout_prob=0.1,
+        num_classes=1000,
+    )
+    return model
+
 
 
 

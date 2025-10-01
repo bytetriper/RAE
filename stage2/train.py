@@ -25,8 +25,10 @@ from glob import glob
 from time import time
 import argparse
 import logging
+from contextlib import nullcontext
 
 import math
+from torch.cuda.amp import autocast
 from stage1 import RAE
 from stage2.model import STAGE2_ARCHS, DiTwDDTHead
 from download import find_model
@@ -118,31 +120,39 @@ def main(args):
 
     # Setup DDP:
     dist.init_process_group("nccl")
-    assert args.global_batch_size % dist.get_world_size() == 0, f"Batch size must be divisible by world size."
+    assert args.grad_accum_steps >= 1, "Gradient accumulation steps must be >= 1."
+    world_size = dist.get_world_size()
+    assert args.global_batch_size % (world_size * args.grad_accum_steps) == 0, \
+        "Global batch size must be divisible by world_size * grad_accum_steps."
     rank = dist.get_rank()
     device = rank % torch.cuda.device_count()
-    seed = args.global_seed * dist.get_world_size() + rank
+    seed = args.global_seed * world_size + rank
     torch.manual_seed(seed)
     torch.cuda.set_device(device)
-    print(f"Starting rank={rank}, seed={seed}, world_size={dist.get_world_size()}.")
-    local_batch_size = int(args.global_batch_size // dist.get_world_size())
+    print(f"Starting rank={rank}, seed={seed}, world_size={world_size}.")
+    micro_batch_size = int(args.global_batch_size // (world_size * args.grad_accum_steps))
+
+    use_bf16 = args.precision == "bf16"
+    if use_bf16 and not torch.cuda.is_bf16_supported():
+        raise ValueError("Requested bf16 precision, but the current CUDA device does not support bfloat16.")
+    autocast_dtype = torch.bfloat16 if use_bf16 else None
 
     # Setup an experiment folder:
     if rank == 0:
         os.makedirs(args.results_dir, exist_ok=True)  # Make results folder (holds all experiment subfolders)
         experiment_index = len(glob(f"{args.results_dir}/*"))
         model_string_name = args.model.replace("/", "-")  # e.g., SiT-XL/2 --> SiT-XL-2 (for naming folders)
+        precision_suffix = f"-{args.precision}" if args.precision == "bf16" else ""
         experiment_name = f"{experiment_index:03d}-{model_string_name}-" \
-                        f"{args.path_type}-{args.prediction}-{args.loss_weight}"
+                        f"{args.path_type}-{args.prediction}-{args.loss_weight}{precision_suffix}-acc{args.grad_accum_steps}"
         experiment_dir = f"{args.results_dir}/{experiment_name}"  # Create an experiment folder
         checkpoint_dir = f"{experiment_dir}/checkpoints"  # Stores saved model checkpoints
         os.makedirs(checkpoint_dir, exist_ok=True)
         logger = create_logger(experiment_dir)
         logger.info(f"Experiment directory created at {experiment_dir}")
-
-        entity = os.environ["ENTITY"]
-        project = os.environ["PROJECT"]
         if args.wandb:
+            entity = os.environ["ENTITY"]
+            project = os.environ["PROJECT"]
             wandb_utils.initialize(args, entity, experiment_name, project)
     else:
         logger = create_logger(None)
@@ -182,7 +192,7 @@ def main(args):
 
     requires_grad(ema, False)
     
-    model = DDP(model.to(device), device_ids=[rank])
+    model = DDP(model.to(device), device_ids=[rank], gradient_as_bucket_view=False)
     transport = create_transport(
         args.path_type,
         args.prediction,
@@ -206,30 +216,34 @@ def main(args):
         normalization_stat_path='models/stats/dinov2/wReg_base/imagenet1k/stat.pt',
     ).to(device)
     rae.eval()
+    model_param_count = sum(p.numel() for p in model.parameters())
+    logger.info(f"Model Parameters: {model_param_count/1e6:.2f}M")
 
-    logger.info(f"Model Parameters: {sum(p.numel() for p in model.parameters()):,}")
+    # Setup optimizer and linear decay schedule (2e-4 -> 2e-5 between epochs 40 and 800):
+    base_lr = 2e-4
+    final_lr = 2e-5
+    decay_start_epoch = 40
+    decay_end_epoch = 800
 
-    # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
-    opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0)
-
+    opt = torch.optim.AdamW(model.parameters(), lr=base_lr, weight_decay=0)
     # Setup data:
     transform = transforms.Compose([
         transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, args.image_size)),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
+        #transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
     ])
     dataset = ImageFolder(args.data_path, transform=transform)
     sampler = DistributedSampler(
         dataset,
-        num_replicas=dist.get_world_size(),
+        num_replicas=world_size,
         rank=rank,
         shuffle=True,
         seed=args.global_seed
     )
     loader = DataLoader(
         dataset,
-        batch_size=local_batch_size,
+        batch_size=micro_batch_size,
         shuffle=False,
         sampler=sampler,
         num_workers=args.num_workers,
@@ -237,7 +251,32 @@ def main(args):
         drop_last=True
     )
     logger.info(f"Dataset contains {len(dataset):,} images ({args.data_path})")
+    logger.info(
+        f"Gradient accumulation: steps={args.grad_accum_steps}, micro batch={micro_batch_size}, "
+        f"per-GPU batch={micro_batch_size * args.grad_accum_steps}, global batch={args.global_batch_size}"
+    )
+    logger.info(f"Precision mode: {args.precision}")
 
+    loader_batches = len(loader)
+    assert loader_batches % args.grad_accum_steps == 0, \
+        "Number of loader batches must be divisible by grad_accum_steps when drop_last=True."
+    steps_per_epoch = loader_batches // args.grad_accum_steps
+    assert steps_per_epoch > 0, "Gradient accumulation configuration results in zero optimizer steps per epoch."
+    decay_start_step = decay_start_epoch * steps_per_epoch
+    decay_end_step = decay_end_epoch * steps_per_epoch
+    final_lr_factor = final_lr / base_lr
+    total_decay_steps = max(decay_end_step - decay_start_step, 1)
+
+    def linear_lr_lambda(step):
+        if step < decay_start_step:
+            return 1.0
+        if step >= decay_end_step:
+            return final_lr_factor
+        progress = (step - decay_start_step) / total_decay_steps
+        return 1.0 - (1.0 - final_lr_factor) * progress
+
+    schedl = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda=linear_lr_lambda)
+    autocast_kwargs = dict(dtype=autocast_dtype, enabled=use_bf16)
     # Prepare models for training:
     update_ema(ema, model.module, decay=0)  # Ensure EMA is initialized with synced weights
     model.train()  # important! This enables embedding dropout for classifier-free guidance
@@ -250,11 +289,12 @@ def main(args):
     start_time = time()
 
     # Labels to condition the model with (feel free to change):
-    ys = torch.randint(1000, size=(local_batch_size,), device=device)
+    ys = torch.randint(1000, size=(micro_batch_size,), device=device)
     use_cfg = args.cfg_scale > 1.0
     # Create sampling noise:
     n = ys.size(0)
-    zs = torch.randn(n, model.module.in_channels, latent_size, latent_size, device=device)
+    latent_dtype = autocast_dtype if use_bf16 else torch.float32
+    zs = torch.randn(n, model.module.in_channels, latent_size, latent_size, device=device, dtype=latent_dtype)
 
     # Setup classifier-free guidance:
     if use_cfg:
@@ -271,24 +311,38 @@ def main(args):
     for epoch in range(args.epochs):
         sampler.set_epoch(epoch)
         logger.info(f"Beginning epoch {epoch}...")
+        opt.zero_grad()
+        accum_counter = 0
+        step_loss_accum = 0.0
         for x, y in loader:
             x = x.to(device)
             y = y.to(device)
             with torch.no_grad():
                 # Map input images to latent space + normalize latents:
                 x = rae.encode(x)
+            if use_bf16:
+                x = x.to(latent_dtype)
             model_kwargs = dict(y=y)
-            loss_dict = transport.training_losses(model, x, model_kwargs)
-            loss = loss_dict["loss"].mean()
-            opt.zero_grad()
-            loss.backward()
-            opt.step()
-            update_ema(ema, model.module)
+            with autocast(**autocast_kwargs):
+                loss_tensor = transport.training_losses(model, x, model_kwargs)["loss"].mean()
+            step_loss_accum += loss_tensor.item()
+            (loss_tensor / args.grad_accum_steps).backward()
+            accum_counter += 1
 
-            # Log loss values:
-            running_loss += loss.item()
+            if accum_counter < args.grad_accum_steps:
+                continue
+
+            opt.step()
+            schedl.step()
+            update_ema(ema, model.module)
+            opt.zero_grad()
+
+            running_loss += step_loss_accum / args.grad_accum_steps # avg loss per micro batch
             log_steps += 1
             train_steps += 1
+            accum_counter = 0
+            step_loss_accum = 0.0
+
             if train_steps % args.log_every == 0:
                 # Measure training speed:
                 torch.cuda.synchronize()
@@ -297,7 +351,7 @@ def main(args):
                 # Reduce loss history over all processes:
                 avg_loss = torch.tensor(running_loss / log_steps, device=device)
                 dist.all_reduce(avg_loss, op=dist.ReduceOp.SUM)
-                avg_loss = avg_loss.item() / dist.get_world_size()
+                avg_loss = avg_loss.item() / world_size
                 logger.info(f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
                 if args.wandb:
                     wandb_utils.log(
@@ -326,17 +380,20 @@ def main(args):
             if train_steps % args.sample_every == 0 and train_steps > 0:
                 logger.info("Generating EMA samples...")
                 sample_fn = transport_sampler.sample_ode() # default to ode sampling
-                samples = sample_fn(zs, model_fn, **sample_model_kwargs)[-1]
+                with autocast(**autocast_kwargs):
+                    samples = sample_fn(zs, model_fn, **sample_model_kwargs)[-1]
                 dist.barrier()
 
                 if use_cfg: #remove null samples
                     samples, _ = samples.chunk(2, dim=0)
-                samples = rae.decode(samples)
+                samples = rae.decode(samples.to(torch.float32))
                 out_samples = torch.zeros((args.global_batch_size, 3, args.image_size, args.image_size), device=device)
                 dist.all_gather_into_tensor(out_samples, samples)
                 if args.wandb:
                     wandb_utils.log_image(out_samples, train_steps)
                 logging.info("Generating EMA samples done.")
+
+        assert accum_counter == 0, "Gradient accumulation counter not zero at epoch end."
 
     model.eval()  # important! This disables randomized embedding dropout
     # do any sampling/FID calculation/etc. with ema (or model) in eval mode ...
@@ -354,14 +411,15 @@ if __name__ == "__main__":
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--epochs", type=int, default=1400)
-    parser.add_argument("--global-batch-size", type=int, default=256)
+    parser.add_argument("--global-batch-size", type=int, default=1024)
+    parser.add_argument("--grad-accum-steps", type=int, default=1)
     parser.add_argument("--global-seed", type=int, default=0)
-    parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=50_000)
     parser.add_argument("--sample-every", type=int, default=10_000)
-    parser.add_argument("--cfg-scale", type=float, default=4.0)
+    parser.add_argument("--cfg-scale", type=float, default=1.0)
+    parser.add_argument("--precision", type=str, choices=["fp32", "bf16"], default="fp32")
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--ckpt", type=str, default=None,
                         help="Optional path to a custom SiT checkpoint")

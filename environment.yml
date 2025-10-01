@@ -1,4 +1,4 @@
-name: SiT
+name: rae
 channels:
   - pytorch
   - nvidia

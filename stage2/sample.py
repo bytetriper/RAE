@@ -102,12 +102,15 @@ def main(mode, args):
     z = torch.cat([z, z], 0)
     y_null = torch.tensor([1000] * n, device=device)
     y = torch.cat([y, y_null], 0)
-    # model_kwargs = dict(y=y, cfg_scale=args.cfg_scale)
-    model_kwargs = dict(y=y)
-
+    if args.cfg_scale > 1.0:
+        model_kwargs = dict(y=y, cfg_scale=args.cfg_scale)
+        model_fwd = model.forward_with_cfg
+    else:
+        model_kwargs = dict(y=y)
+        model_fwd = model.forward
     # Sample images:
     start_time = time()
-    samples = sample_fn(z, model.forward, **model_kwargs)[-1]
+    samples = sample_fn(z, model_fwd, **model_kwargs)[-1]
     samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
     # samples = vae.decode(samples / 0.18215).sample
     samples = rae.decode(samples)
