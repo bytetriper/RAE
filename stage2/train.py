@@ -26,6 +26,7 @@ from time import time
 import argparse
 import logging
 
+import math
 from stage1 import RAE
 from stage2.model import STAGE2_ARCHS, DiTwDDTHead
 from download import find_model
@@ -152,8 +153,22 @@ def main(args):
     model = STAGE2_ARCHS[args.model](
         token_dim=768,  # Assuming the latent token dimension from stage 1
         input_size=16,  # Assuming the latent size from stage 1 is 32x32 for 256x256 input
-    )
-
+    )    
+    rae = RAE(
+        encoder_cls='Dinov2withNorm',
+        encoder_config_path='models/encoders/dinov2/wReg_base',
+        encoder_input_size=224,
+        encoder_params={'dinov2_path': 'models/encoders/dinov2/wReg_base', 'normalize': True},
+        decoder_config_path='configs/decoder/ViTXL',
+        pretrained_decoder_path='models/decoders/dinov2/wReg_base/ViTXL_n08/model.pt',
+        noise_tau=0.,
+        reshape_to_2d=True,   
+        normalization_stat_path='models/stats/dinov2/wReg_base/imagenet1k/stat.pt',
+    ).to(device)
+    rae.eval()
+    rae_dim = 768 * 16 * 16
+    args.time_dist_shift = math.sqrt(rae_dim/args.time_dist_shift_base)  # default base=4096, for 256x256 images with latent size 16x16
+    print(f"Using time_dist_shift={args.time_dist_shift:.4f} based on latent dimension {rae_dim}.")
     # Note that parameter initialization is done within the SiT constructor
     ema = deepcopy(model).to(device)  # Create an EMA of the model for use after training
 

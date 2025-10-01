@@ -25,6 +25,7 @@ import numpy as np
 import math
 import argparse
 import sys
+import math
 
 
 def create_npz_from_sample_folder(sample_dir, num=50_000):
@@ -84,8 +85,22 @@ def main(mode, args):
     state_dict = find_model(ckpt_path)
     model.load_state_dict(state_dict)
     model.eval()  # important!
-    
-    
+    # TODO: update RAE hardcoded load
+    rae = RAE(
+        encoder_cls='Dinov2withNorm',
+        encoder_config_path='models/encoders/dinov2/wReg_base',
+        encoder_input_size=224,
+        encoder_params={'dinov2_path': 'models/encoders/dinov2/wReg_base', 'normalize': True},
+        decoder_config_path='configs/decoder/ViTXL',
+        pretrained_decoder_path='models/decoders/dinov2/wReg_base/ViTXL_n08/model.pt',
+        noise_tau=0.,
+        reshape_to_2d=True,   
+        normalization_stat_path='models/stats/dinov2/wReg_base/imagenet1k/stat.pt',
+    ).to(device)
+    rae.eval()
+    rae_dim = 768 * 16 * 16
+    args.time_dist_shift = math.sqrt(rae_dim/args.time_dist_shift_base)  # default base=4096, for 256x256 images with latent size 16x16
+    print(f"Using time_dist_shift={args.time_dist_shift:.4f} based on latent dimension {rae_dim}.")
     transport = create_transport(
         args.path_type,
         args.prediction,
@@ -114,19 +129,6 @@ def main(mode, args):
             num_steps=args.num_sampling_steps,
         )
     
-    # TODO: update RAE hardcoded load
-    rae = RAE(
-        encoder_cls='Dinov2withNorm',
-        encoder_config_path='models/encoders/dinov2/wReg_base',
-        encoder_input_size=224,
-        encoder_params={'dinov2_path': 'models/encoders/dinov2/wReg_base', 'normalize': True},
-        decoder_config_path='configs/decoder/ViTXL',
-        pretrained_decoder_path='models/decoders/dinov2/wReg_base/ViTXL_n08/model.pt',
-        noise_tau=0.,
-        reshape_to_2d=True,   
-        normalization_stat_path='models/stats/dinov2/wReg_base/imagenet1k/stat.pt',
-    ).to(device)
-    rae.eval()
     assert args.cfg_scale >= 1.0, "In almost all cases, cfg_scale be >= 1.0"
     using_cfg = args.cfg_scale > 1.0
 

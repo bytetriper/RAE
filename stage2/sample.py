@@ -18,7 +18,7 @@ from train_utils import parse_ode_args, parse_sde_args, parse_transport_args
 from transport import create_transport, Sampler
 import argparse
 from time import time
-
+import math
 def main(mode, args):
     # Setup PyTorch:
     torch.manual_seed(args.seed)
@@ -45,6 +45,21 @@ def main(mode, args):
     state_dict = find_model(ckpt_path)
     model.load_state_dict(state_dict)
     model.eval()  # important!
+    rae = RAE(
+        encoder_cls='Dinov2withNorm',
+        encoder_config_path='models/encoders/dinov2/wReg_base',
+        encoder_input_size=224,
+        encoder_params={'dinov2_path': 'models/encoders/dinov2/wReg_base', 'normalize': True},
+        decoder_config_path='configs/decoder/ViTXL',
+        pretrained_decoder_path='models/decoders/dinov2/wReg_base/ViTXL_n08/model.pt',
+        noise_tau=0.,
+        reshape_to_2d=True,   
+        normalization_stat_path='models/stats/dinov2/wReg_base/imagenet1k/stat.pt',
+    ).to(device)
+    rae.eval()
+    rae_dim = 768 * 16 * 16
+    args.time_dist_shift = math.sqrt(rae_dim/args.time_dist_shift_base)  # default base=4096, for 256x256 images with latent size 16x16
+    print(f"Using time_dist_shift={args.time_dist_shift:.4f} based on latent dimension {rae_dim}.")
     transport = create_transport(
         args.path_type,
         args.prediction,
@@ -74,22 +89,9 @@ def main(mode, args):
             num_steps=args.num_sampling_steps,
         )
     
-
-    rae = RAE(
-        encoder_cls='Dinov2withNorm',
-        encoder_config_path='models/encoders/dinov2/wReg_base',
-        encoder_input_size=224,
-        encoder_params={'dinov2_path': 'models/encoders/dinov2/wReg_base', 'normalize': True},
-        decoder_config_path='configs/decoder/ViTXL',
-        pretrained_decoder_path='models/decoders/dinov2/wReg_base/ViTXL_n08/model.pt',
-        noise_tau=0.,
-        reshape_to_2d=True,   
-        normalization_stat_path='models/stats/dinov2/wReg_base/imagenet1k/stat.pt',
-    ).to(device)
-    rae.eval()
     
     # Labels to condition the model with (feel free to change):
-    class_labels = [207, 360, 387, 974, 88, 979, 417, 279]
+    class_labels = [207, 360]
     
     # Create sampling noise:
     n = len(class_labels)
