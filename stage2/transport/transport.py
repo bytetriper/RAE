@@ -304,7 +304,7 @@ class Sampler:
             return diffusion
         
         def sde_drift_fn(x, t, model, **kwargs):
-            drift_mean = self.drift(x, t, model, **kwargs) + sde_diffusion_fn(x, t) * self.score(x, t, model, **kwargs)
+            drift_mean = self.drift(x, t, model, **kwargs) - sde_diffusion_fn(x, t) * self.score(x, t, model, **kwargs)
             return drift_mean
     
 
@@ -326,7 +326,7 @@ class Sampler:
         elif last_step == "Mean":
             last_step_fn = \
                 lambda x, t, model, **model_kwargs: \
-                    x + sde_drift(x, t, model, **model_kwargs) * last_step_size
+                    x - sde_drift(x, t, model, **model_kwargs) * last_step_size
         elif last_step == "Tweedie":
             alpha = self.transport.path_sampler.compute_alpha_t # simple aliasing; the original name was too long
             sigma = self.transport.path_sampler.compute_sigma_t
@@ -336,7 +336,7 @@ class Sampler:
         elif last_step == "Euler":
             last_step_fn = \
                 lambda x, t, model, **model_kwargs: \
-                    x + self.drift(x, t, model, **model_kwargs) * last_step_size
+                    x - self.drift(x, t, model, **model_kwargs) * last_step_size
         else:
             raise NotImplementedError()
 
@@ -395,7 +395,7 @@ class Sampler:
 
         def _sample(init, model, **model_kwargs):
             xs = _sde.sample(init, model, **model_kwargs)
-            ts = th.ones(init.size(0), device=init.device) * t1
+            ts = th.ones(init.size(0), device=init.device) * (1 - t1)
             x = last_step_fn(xs[-1], ts, model, **model_kwargs)
             xs.append(x)
 

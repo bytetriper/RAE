@@ -22,15 +22,15 @@ class ICPlan:
 
     def compute_alpha_t(self, t):
         """Compute the data coefficient along the path"""
-        return t, 1
+        return 1 - t, -1
     
     def compute_sigma_t(self, t):
         """Compute the noise coefficient along the path"""
-        return 1 - t, -1
+        return t, 1
     
     def compute_d_alpha_alpha_ratio_t(self, t):
         """Compute the ratio between d_alpha and alpha"""
-        return 1 / t
+        return -1 / (1 - t)
 
     def compute_drift(self, x, t):
         """We always output sde according to score parametrization; """
@@ -55,9 +55,10 @@ class ICPlan:
             "constant": norm,
             "SBDM": norm * self.compute_drift(x, t)[1],
             "sigma": norm * self.compute_sigma_t(t)[0],
-            "linear": norm * (1 - t),
-            "decreasing": 0.25 * (norm * th.cos(np.pi * t) + 1) ** 2,
-            "inccreasing-decreasing": norm * th.sin(np.pi * t) ** 2,
+            # "linear": norm * (1 - t),
+            "linear": norm * t,
+            "decreasing": 0.25 * (norm * th.cos(np.pi * (1 - t)) + 1) ** 2,
+            "inccreasing-decreasing": norm * th.sin(np.pi * (1 - t)) ** 2,
         }
 
         try:
@@ -145,24 +146,24 @@ class VPCPlan(ICPlan):
         self.log_mean_coeff = lambda t: -0.25 * ((1 - t) ** 2) * (self.sigma_max - self.sigma_min) - 0.5 * (1 - t) * self.sigma_min 
         self.d_log_mean_coeff = lambda t: 0.5 * (1 - t) * (self.sigma_max - self.sigma_min) + 0.5 * self.sigma_min
 
-
     def compute_alpha_t(self, t):
-        """Compute coefficient of x1"""
-        alpha_t = self.log_mean_coeff(t)
-        alpha_t = th.exp(alpha_t)
-        d_alpha_t = alpha_t * self.d_log_mean_coeff(t)
-        return alpha_t, d_alpha_t
-    
-    def compute_sigma_t(self, t):
         """Compute coefficient of x0"""
-        p_sigma_t = 2 * self.log_mean_coeff(t)
-        sigma_t = th.sqrt(1 - th.exp(p_sigma_t))
-        d_sigma_t = th.exp(p_sigma_t) * (2 * self.d_log_mean_coeff(t)) / (-2 * sigma_t)
+        p_alpha_t = 2 * self.log_mean_coeff(t)
+        alpha_t = th.sqrt(1 - th.exp(p_alpha_t))
+        d_alpha_t = th.exp(p_alpha_t) * (2 * self.d_log_mean_coeff(t)) / (-2 * alpha_t)
+        return alpha_t, d_alpha_t
+
+    def compute_sigma_t(self, t):
+        """Compute coefficient of x1"""
+        sigma_t = self.log_mean_coeff(t)
+        sigma_t = th.exp(sigma_t)
+        d_sigma_t = sigma_t * self.d_log_mean_coeff(t)
         return sigma_t, d_sigma_t
     
     def compute_d_alpha_alpha_ratio_t(self, t):
         """Special purposed function for computing numerical stabled d_alpha_t / alpha_t"""
-        return self.d_log_mean_coeff(t)
+        alpha_t, d_alpha_t = self.compute_alpha_t(t)
+        return d_alpha_t / alpha_t
 
     def compute_drift(self, x, t):
         """Compute the drift term of the SDE"""
@@ -177,16 +178,16 @@ class GVPCPlan(ICPlan):
     
     def compute_alpha_t(self, t):
         """Compute coefficient of x1"""
-        alpha_t = th.sin(t * np.pi / 2)
-        d_alpha_t = np.pi / 2 * th.cos(t * np.pi / 2)
+        alpha_t = th.cos(t * np.pi / 2)
+        d_alpha_t = -np.pi / 2 * th.sin(t * np.pi / 2)
         return alpha_t, d_alpha_t
     
     def compute_sigma_t(self, t):
         """Compute coefficient of x0"""
-        sigma_t = th.cos(t * np.pi / 2)
-        d_sigma_t = -np.pi / 2 * th.sin(t * np.pi / 2)
+        sigma_t = th.sin(t * np.pi / 2)
+        d_sigma_t = np.pi / 2 * th.cos(t * np.pi / 2)
         return sigma_t, d_sigma_t
     
     def compute_d_alpha_alpha_ratio_t(self, t):
         """Special purposed function for computing numerical stabled d_alpha_t / alpha_t"""
-        return np.pi / (2 * th.tan(t * np.pi / 2))
+        return -np.pi / 2 * th.tan(t * np.pi / 2)
