@@ -52,10 +52,10 @@ def truncated_logitnormal_sample(
     Returns:
         Tensor of samples with shape = broadcast(shape, mu.shape, ...)
     """
-    mu   = th.as_tensor(mu, device=device, dtype=dtype)
-    sigma= th.as_tensor(sigma, device=device, dtype=dtype)
-    low  = th.as_tensor(low, device=device, dtype=dtype)
-    high = th.as_tensor(high, device=device, dtype=dtype)
+    mu   = th.as_tensor(mu)
+    sigma= th.as_tensor(sigma)
+    low  = th.as_tensor(low)
+    high = th.as_tensor(high)
 
     # Map truncation bounds to logit space; handles 0/1 → ±inf automatically.
     z_low  = th.logit(low)   # = -inf if low==0
@@ -299,17 +299,16 @@ class Sampler:
         diffusion_norm=1.0,
     ):
 
-        def diffusion_fn(x, t):
+        def sde_diffusion_fn(x, t):
             diffusion = self.transport.path_sampler.compute_diffusion(x, t, form=diffusion_form, norm=diffusion_norm)
             return diffusion
         
-        sde_drift = \
-            lambda x, t, model, **kwargs: \
-                self.drift(x, t, model, **kwargs) + diffusion_fn(x, t) * self.score(x, t, model, **kwargs)
+        def sde_drift_fn(x, t, model, **kwargs):
+            drift_mean = self.drift(x, t, model, **kwargs) + sde_diffusion_fn(x, t) * self.score(x, t, model, **kwargs)
+            return drift_mean
     
-        sde_diffusion = diffusion_fn
 
-        return sde_drift, sde_diffusion
+        return sde_drift_fn, sde_diffusion_fn
     
     def __get_last_step(
         self,
@@ -387,7 +386,8 @@ class Sampler:
             t0=t0,
             t1=t1,
             num_steps=num_steps,
-            sampler_type=sampling_method
+            sampler_type=sampling_method,
+            time_dist_shift=self.transport.time_dist_shift,
         )
 
         last_step_fn = self.__get_last_step(sde_drift, last_step=last_step, last_step_size=last_step_size)
@@ -446,65 +446,7 @@ class Sampler:
             num_steps=num_steps,
             atol=atol,
             rtol=rtol,
+            time_dist_shift=self.transport.time_dist_shift,
         )
         
         return _ode.sample
-
-    def sample_ode_likelihood(
-        self,
-        *,
-        sampling_method="dopri5",
-        num_steps=50,
-        atol=1e-6,
-        rtol=1e-3,
-    ):
-        
-        """returns a sampling function for calculating likelihood with given ODE settings
-        Args:
-        - sampling_method: type of sampler used in solving the ODE; default to be Dopri5
-        - num_steps: 
-            - fixed solver (Euler, Heun): the actual number of integration steps performed
-            - adaptive solver (Dopri5): the number of datapoints saved during integration; produced by interpolation
-        - atol: absolute error tolerance for the solver
-        - rtol: relative error tolerance for the solver
-        """
-        def _likelihood_drift(x, t, model, **model_kwargs):
-            x, _ = x
-            eps = th.randint(2, x.size(), dtype=th.float, device=x.device) * 2 - 1
-            t = th.ones_like(t) * (1 - t)
-            with th.enable_grad():
-                x.requires_grad = True
-                grad = th.autograd.grad(th.sum(self.drift(x, t, model, **model_kwargs) * eps), x)[0]
-                logp_grad = th.sum(grad * eps, dim=tuple(range(1, len(x.size()))))
-                drift = self.drift(x, t, model, **model_kwargs)
-            return (-drift, logp_grad)
-        
-        t0, t1 = self.transport.check_interval(
-            self.transport.train_eps,
-            self.transport.sample_eps,
-            sde=False,
-            eval=True,
-            reverse=False,
-            last_step_size=0.0,
-        )
-
-        _ode = ode(
-            drift=_likelihood_drift,
-            t0=t0,
-            t1=t1,
-            sampler_type=sampling_method,
-            num_steps=num_steps,
-            atol=atol,
-            rtol=rtol,
-        )
-
-        def _sample_fn(x, model, **model_kwargs):
-            init_logp = th.zeros(x.size(0)).to(x)
-            input = (x, init_logp)
-            drift, delta_logp = _ode.sample(input, model, **model_kwargs)
-            drift, delta_logp = drift[-1], delta_logp[-1]
-            prior_logp = self.transport.prior_logp(drift)
-            logp = prior_logp - delta_logp
-            return logp, drift
-
-        return _sample_fn

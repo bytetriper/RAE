@@ -25,7 +25,6 @@ from glob import glob
 from time import time
 import argparse
 import logging
-import os
 
 from stage1 import RAE
 from stage2.model import STAGE2_ARCHS, DiTwDDTHead
@@ -151,8 +150,8 @@ def main(args):
     assert args.image_size % 16 == 0, "Image size must be divisible by 8 (for the RAE encoder)."
     latent_size = args.image_size // 16
     model = STAGE2_ARCHS[args.model](
-        input_size=latent_size,
-        num_classes=args.num_classes
+        token_dim=768,  # Assuming the latent token dimension from stage 1
+        input_size=16,  # Assuming the latent size from stage 1 is 32x32 for 256x256 input
     )
 
     # Note that parameter initialization is done within the SiT constructor
@@ -193,7 +192,7 @@ def main(args):
     ).to(device)
     rae.eval()
 
-    logger.info(f"SiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
+    logger.info(f"Model Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
     opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0)
@@ -240,7 +239,7 @@ def main(args):
     use_cfg = args.cfg_scale > 1.0
     # Create sampling noise:
     n = ys.size(0)
-    zs = torch.randn(n, 4, latent_size, latent_size, device=device)
+    zs = torch.randn(n, model.module.in_channels, latent_size, latent_size, device=device)
 
     # Setup classifier-free guidance:
     if use_cfg:
