@@ -97,22 +97,13 @@ def main(mode, args):
     )
     sampler = Sampler(transport)
     if mode == "ODE":
-        if args.likelihood:
-            assert args.cfg_scale == 1, "Likelihood is incompatible with guidance"
-            sample_fn = sampler.sample_ode_likelihood(
-                sampling_method=args.sampling_method,
-                num_steps=args.num_sampling_steps,
-                atol=args.atol,
-                rtol=args.rtol,
-            )
-        else:
-            sample_fn = sampler.sample_ode(
-                sampling_method=args.sampling_method,
-                num_steps=args.num_sampling_steps,
-                atol=args.atol,
-                rtol=args.rtol,
-                reverse=args.reverse
-            )
+        sample_fn = sampler.sample_ode(
+            sampling_method=args.sampling_method,
+            num_steps=args.num_sampling_steps,
+            atol=args.atol,
+            rtol=args.rtol,
+            reverse=args.reverse
+        )
     elif mode == "SDE":
         sample_fn = sampler.sample_sde(
             sampling_method=args.sampling_method,

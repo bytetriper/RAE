@@ -16,6 +16,7 @@ class sde:
         t1,
         num_steps,
         sampler_type,
+        time_dist_shift,
     ):
         assert t0 < t1, "SDE sampler has to be in forward time"
 
@@ -25,8 +26,10 @@ class sde:
         self.drift = drift
         self.diffusion = diffusion
         self.sampler_type = sampler_type
+        self.time_dist_shift = time_dist_shift
 
     def __Euler_Maruyama_step(self, x, mean_x, t, model, **model_kwargs):
+        t = self.time_dist_shift * t / (1 + (self.time_dist_shift - 1) * t)
         w_cur = th.randn(x.size()).to(x)
         t = th.ones(x.size(0)).to(x) * t
         dw = w_cur * th.sqrt(self.dt)
@@ -37,6 +40,7 @@ class sde:
         return x, mean_x
     
     def __Heun_step(self, x, _, t, model, **model_kwargs):
+        t = self.time_dist_shift * t / (1 + (self.time_dist_shift - 1) * t)
         w_cur = th.randn(x.size()).to(x)
         dw = w_cur * th.sqrt(self.dt)
         t_cur = th.ones(x.size(0)).to(x) * t
@@ -86,13 +90,17 @@ class ode:
         num_steps,
         atol,
         rtol,
+        time_dist_shift,
     ):
         assert t0 < t1, "ODE sampler has to be in forward time"
 
         self.drift = drift
-        self.t = th.linspace(t0, t1, num_steps)
+        # self.t = th.linspace(t0, t1, num_steps)
+        self.t = th.linspace(t1, t0, num_steps)
         self.atol = atol
         self.rtol = rtol
+        self.time_dist_shift = time_dist_shift
+        self.t = self.time_dist_shift * self.t / (1 + (self.time_dist_shift - 1) * self.t)
         self.sampler_type = sampler_type
 
     def sample(self, x, model, **model_kwargs):
@@ -100,9 +108,8 @@ class ode:
         device = x[0].device if isinstance(x, tuple) else x.device
         def _fn(t, x):
             t = th.ones(x[0].size(0)).to(device) * t if isinstance(x, tuple) else th.ones(x.size(0)).to(device) * t
-            t = 1 - t
             model_output = self.drift(x, t, model, **model_kwargs)
-            return -model_output
+            return model_output
 
         t = self.t.to(device)
         atol = [self.atol] * len(x) if isinstance(x, tuple) else [self.atol]
