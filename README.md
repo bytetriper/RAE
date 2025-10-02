@@ -22,6 +22,8 @@ produce large evaluation batches with DDP sampling.
 
 Download `/data/boyang/models/` on 74 and `ln -s` to `RAE/models/` 
 
+If you don't have access to 74, you can also download the folder from : `gs://boyang-data-east/gpu_models/models/` using `gsutil -m cp -r gs://boyang-data-east/gpu_models/models/ RAE/`
+
 Download standard ImageNet-1k and put it to somewhere you like.
 
 Then it should be directly runnable.
