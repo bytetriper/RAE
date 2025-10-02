@@ -7,6 +7,4 @@ results
 pretrained_models
 
 models/
-**/
 __pycache__/
-samples
