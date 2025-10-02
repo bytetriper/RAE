@@ -166,7 +166,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", type=str, default="DDTXL")
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
     parser.add_argument("--ckpt", type=str, default=None)
-    parser.add_argument("--class-label", type=int, default=250)
+    parser.add_argument("--class-label", type=int, default=207)
     parser.add_argument("--num-steps", type=int, default=50)
     parser.add_argument("--t-min", type=float, default=1.0 / 1000.0)
     parser.add_argument("--t-max", type=float, default=1.0)
@@ -177,7 +177,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--noise-path",
         type=str,
-        default=os.path.join(default_data_dir, "stage2_manual_noise.npz"),
+        default=os.path.join(default_data_dir, "stage2_initial_noise.npz"),
     )
     parser.add_argument(
         "--image-path",
