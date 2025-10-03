@@ -122,7 +122,8 @@ def run_sampling(args):
     torch.manual_seed(args.seed)
     torch.set_grad_enabled(False)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    force_cpu = os.environ.get("RAE_FORCE_CPU", "0") == "1"
+    device = torch.device("cpu" if force_cpu else "cuda" if torch.cuda.is_available() else "cpu")
 
     model, rae, latent_size = build_models(args, device)
 

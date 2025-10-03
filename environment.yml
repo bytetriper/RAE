@@ -3,14 +3,13 @@ channels:
   - pytorch
   - nvidia
 dependencies:
-  - python >= 3.8
-  - pytorch >= 1.13
-  - torchvision
-  - pytorch-cuda >=11.7
+  - python == 3.10
+  - pytorch == 2.2.0
+  - torchvision == 0.17.0
+  - pytorch-cuda >= 12.1
   - pip
   - pip:
-    - timm
-    - diffusers
-    - accelerate
-    - torchdiffeq
+    - timm == 0.9.16
+    - accelerate == 0.23.0
+    - torchdiffeq == 0.2.5
     - wandb
