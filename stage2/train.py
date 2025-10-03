@@ -399,7 +399,7 @@ def main(args):
                     if use_cfg: #remove null samples
                         samples, _ = samples.chunk(2, dim=0)
                     samples = rae.decode(samples.to(torch.float32))
-                    out_samples = torch.zeros((args.global_batch_size, 3, args.image_size, args.image_size), device=device)
+                    out_samples = torch.zeros((args.global_batch_size // args.grad_accum_steps, 3, args.image_size, args.image_size), device=device)
                     dist.all_gather_into_tensor(out_samples, samples)
                     if args.wandb:
                         wandb_utils.log_image(out_samples, train_steps)
