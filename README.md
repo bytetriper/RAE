@@ -95,6 +95,7 @@ torchrun --nproc_per_node=8 stage2/train.py \
   --global-batch-size 1024 \
   --grad-accum-steps 1 \
   --precision bf16 \
+  --ema-decay 0.9995 \
   --wandb
 ```
 

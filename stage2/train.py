@@ -424,7 +424,7 @@ if __name__ == "__main__":
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--epochs", type=int, default=1400)
     parser.add_argument("--global-batch-size", type=int, default=1024)
-    parser.add_argument("--ema-decay", type=float, default=0.9999)
+    parser.add_argument("--ema-decay", type=float, default=0.9995)
     parser.add_argument("--grad-accum-steps", type=int, default=1)
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--num-workers", type=int, default=4)
