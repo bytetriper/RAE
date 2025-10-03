@@ -166,9 +166,9 @@ def main(args):
     )
     rae = RAE(
         encoder_cls='Dinov2withNorm',
-        encoder_config_path='models/encoders/dinov2/wReg_base',
+        encoder_config_path='facebook/dinov2-with-registers-base',
         encoder_input_size=224,
-        encoder_params={'dinov2_path': 'models/encoders/dinov2/wReg_base', 'normalize': True},
+        encoder_params={'dinov2_path': 'facebook/dinov2-with-registers-base', 'normalize': True},
         decoder_config_path='configs/decoder/ViTXL',
         pretrained_decoder_path='models/decoders/dinov2/wReg_base/ViTXL_n08/model.pt',
         noise_tau=0.,
@@ -220,9 +220,9 @@ def main(args):
 
     rae = RAE(
         encoder_cls='Dinov2withNorm',
-        encoder_config_path='models/encoders/dinov2/wReg_base',
+        encoder_config_path='facebook/dinov2-with-registers-base',
         encoder_input_size=224,
-        encoder_params={'dinov2_path': 'models/encoders/dinov2/wReg_base', 'normalize': True},
+        encoder_params={'dinov2_path': 'facebook/dinov2-with-registers-base', 'normalize': True},
         decoder_config_path='configs/decoder/ViTXL',
         pretrained_decoder_path='models/decoders/dinov2/wReg_base/ViTXL_n08/model.pt',
         noise_tau=0.,

@@ -26,6 +26,7 @@ class RAE(nn.Module):
         super().__init__()
         encoder_cls = ARCHS[encoder_cls]
         self.encoder = encoder_cls(**encoder_params)
+        print(f"encoder_config_path: {encoder_config_path}")
         proc = AutoImageProcessor.from_pretrained(encoder_config_path)
         self.encoder_mean = torch.tensor(proc.image_mean).view(1, 3, 1, 1)
         self.encoder_std = torch.tensor(proc.image_std).view(1, 3, 1, 1)

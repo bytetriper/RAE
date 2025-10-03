@@ -47,9 +47,27 @@ If you encounter `iJIT_NotifyEvent` or NumPy 2.x errors, use this clean install:
 
 ## Data & Model Preparation
 
-Download `/data/boyang/models/` on 74 and `ln -s` to `RAE/models/` 
+### Download Pre-trained Models
 
-If you don't have access to 74, you can also download the folder from : `gs://boyang-data-east/gpu_models/models/` using `gsutil -m cp -r gs://boyang-data-east/gpu_models/models/ RAE/`
+The Stage 1 encoder uses `facebook/dinov2-with-registers-base` (downloaded automatically from HuggingFace), but you need to manually download the decoder and normalization statistics:
+
+```bash
+cd RAE
+
+# Install huggingface_hub if not already installed
+pip install huggingface_hub
+
+# Download decoder model and normalization stats
+huggingface-cli download nyu-visionx/RAE-models \
+  decoders/dinov2/wReg_base/ViTXL_n08/model.pt \
+  --local-dir models --local-dir-use-symlinks False
+
+huggingface-cli download nyu-visionx/RAE-models \
+  stats/dinov2/wReg_base/imagenet1k/stat.pt \
+  --local-dir models --local-dir-use-symlinks False
+```
+
+### Prepare Dataset
 
 Download standard ImageNet-1k and put it to somewhere you like.
 
