@@ -42,7 +42,7 @@ def main(mode, args):
     ).to(device)
     # Auto-download a pre-trained model or load a custom SiT checkpoint from train.py:
     ckpt_path = args.ckpt or f"SiT-XL-2-{args.image_size}x{args.image_size}.pt"
-    state_dict = find_model(ckpt_path)
+    state_dict = find_model(ckpt_path, ema_only=True)
     model.load_state_dict(state_dict)
     model.eval()  # important!
     rae = RAE(

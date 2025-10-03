@@ -163,7 +163,7 @@ def main(args):
     model = STAGE2_ARCHS[args.model](
         token_dim=768,  # Assuming the latent token dimension from stage 1
         input_size=16,  # Assuming the latent size from stage 1 is 32x32 for 256x256 input
-    )    
+    )
     rae = RAE(
         encoder_cls='Dinov2withNorm',
         encoder_config_path='models/encoders/dinov2/wReg_base',
@@ -182,17 +182,31 @@ def main(args):
     # Note that parameter initialization is done within the SiT constructor
     ema = deepcopy(model).to(device)  # Create an EMA of the model for use after training
 
+    train_steps = 0
+
     if args.ckpt is not None:
         ckpt_path = args.ckpt
         state_dict = find_model(ckpt_path)
         model.load_state_dict(state_dict["model"])
         ema.load_state_dict(state_dict["ema"])
-        opt.load_state_dict(state_dict["opt"])
         args = state_dict["args"]
+        train_steps = state_dict.get("train_steps", 0)
 
     requires_grad(ema, False)
     
     model = DDP(model.to(device), device_ids=[rank], gradient_as_bucket_view=False)
+
+    # Setup optimizer and linear decay schedule (2e-4 -> 2e-5 between epochs 40 and 800):
+    base_lr = 2e-4
+    final_lr = 2e-5
+    decay_start_epoch = 40
+    decay_end_epoch = 800
+
+    opt = torch.optim.AdamW(model.parameters(), lr=base_lr, weight_decay=0)
+
+    if args.ckpt is not None:
+        opt.load_state_dict(state_dict["opt"])
+
     transport = create_transport(
         args.path_type,
         args.prediction,
@@ -219,13 +233,6 @@ def main(args):
     model_param_count = sum(p.numel() for p in model.parameters())
     logger.info(f"Model Parameters: {model_param_count/1e6:.2f}M")
 
-    # Setup optimizer and linear decay schedule (2e-4 -> 2e-5 between epochs 40 and 800):
-    base_lr = 2e-4
-    final_lr = 2e-5
-    decay_start_epoch = 40
-    decay_end_epoch = 800
-
-    opt = torch.optim.AdamW(model.parameters(), lr=base_lr, weight_decay=0)
     # Setup data:
     transform = transforms.Compose([
         transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, args.image_size)),
@@ -283,7 +290,6 @@ def main(args):
     ema.eval()  # EMA model should always be in eval mode
 
     # Variables for monitoring/logging purposes:
-    train_steps = 0
     log_steps = 0
     running_loss = 0
     start_time = time()
@@ -370,27 +376,33 @@ def main(args):
                         "model": model.module.state_dict(),
                         "ema": ema.state_dict(),
                         "opt": opt.state_dict(),
-                        "args": args
+                        "train_steps": train_steps,
+                        "args": args,
                     }
                     checkpoint_path = f"{checkpoint_dir}/{train_steps:07d}.pt"
                     torch.save(checkpoint, checkpoint_path)
                     logger.info(f"Saved checkpoint to {checkpoint_path}")
                 dist.barrier()
             
-            if train_steps % args.sample_every == 0 and train_steps > 0:
+            # if train_steps % args.sample_every == 0 and train_steps > 0:
+            if train_steps % args.sample_every == 0 or train_steps == 1:
                 logger.info("Generating EMA samples...")
-                sample_fn = transport_sampler.sample_ode() # default to ode sampling
-                with autocast(**autocast_kwargs):
-                    samples = sample_fn(zs, model_fn, **sample_model_kwargs)[-1]
-                dist.barrier()
+                with torch.no_grad():
+                    sample_fn = transport_sampler.sample_ode(
+                        sampling_method='euler',
 
-                if use_cfg: #remove null samples
-                    samples, _ = samples.chunk(2, dim=0)
-                samples = rae.decode(samples.to(torch.float32))
-                out_samples = torch.zeros((args.global_batch_size, 3, args.image_size, args.image_size), device=device)
-                dist.all_gather_into_tensor(out_samples, samples)
-                if args.wandb:
-                    wandb_utils.log_image(out_samples, train_steps)
+                    ) # default to ode sampling
+                    with autocast(**autocast_kwargs):
+                        samples = sample_fn(zs, model_fn, **sample_model_kwargs)[-1]
+                    dist.barrier()
+
+                    if use_cfg: #remove null samples
+                        samples, _ = samples.chunk(2, dim=0)
+                    samples = rae.decode(samples.to(torch.float32))
+                    out_samples = torch.zeros((args.global_batch_size, 3, args.image_size, args.image_size), device=device)
+                    dist.all_gather_into_tensor(out_samples, samples)
+                    if args.wandb:
+                        wandb_utils.log_image(out_samples, train_steps)
                 logging.info("Generating EMA samples done.")
 
         assert accum_counter == 0, "Gradient accumulation counter not zero at epoch end."
@@ -417,7 +429,7 @@ if __name__ == "__main__":
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-every", type=int, default=100)
-    parser.add_argument("--ckpt-every", type=int, default=50_000)
+    parser.add_argument("--ckpt-every", type=int, default=5_000)
     parser.add_argument("--sample-every", type=int, default=10_000)
     parser.add_argument("--cfg-scale", type=float, default=1.0)
     parser.add_argument("--precision", type=str, choices=["fp32", "bf16"], default="fp32")
