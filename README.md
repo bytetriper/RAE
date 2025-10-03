@@ -7,7 +7,9 @@ produce large evaluation batches with DDP sampling.
 
 ## Environment
 
-1. Install the conda environment (CUDA 11.7+ recommended):
+### Standard Setup (A100, CUDA 11.7+)
+
+1. Install the conda environment:
    ```bash
    conda env create -f environment.yml
    conda activate rae
@@ -17,6 +19,31 @@ produce large evaluation batches with DDP sampling.
    paper repository).
 3. Ensure image data is arranged in an ImageNet-style folder tree for
    `torchvision.datasets.ImageFolder`.
+
+### H100 Setup (CUDA 12.1+)
+
+If you encounter `iJIT_NotifyEvent` or NumPy 2.x errors, use this clean install:
+
+1. Create environment and install via `uv`:
+   ```bash
+   conda create -n rae python=3.10 -y
+   conda activate rae
+   pip install uv
+   
+   # Install PyTorch 2.2.0 with CUDA 12.1
+   uv pip install torch==2.2.0 torchvision==0.17.0 torchaudio --index-url https://download.pytorch.org/whl/cu121
+   
+   # Install other dependencies
+   uv pip install timm==0.9.16 accelerate==0.23.0 torchdiffeq==0.2.5 wandb
+   uv pip install "numpy<2" transformers einops
+   ```
+
+2. (Optional) Load CUDA 12.4 if needed:
+   ```bash
+   module load cuda/12.4
+   ```
+
+3. Download Stage 1 checkpoints and prepare data as in standard setup.
 
 ## Data & Model Preparation
 

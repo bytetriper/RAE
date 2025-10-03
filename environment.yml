@@ -6,7 +6,7 @@ dependencies:
   - python == 3.10
   - pytorch == 2.2.0
   - torchvision == 0.17.0
-  - pytorch-cuda >= 12.1
+  - pytorch-cuda == 12.1
   - pip
   - pip:
     - timm == 0.9.16
