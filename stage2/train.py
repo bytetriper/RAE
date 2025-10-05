@@ -140,7 +140,7 @@ def main(args):
     # Setup an experiment folder:
     if rank == 0:
         os.makedirs(args.results_dir, exist_ok=True)  # Make results folder (holds all experiment subfolders)
-        experiment_index = len(glob(f"{args.results_dir}/*"))
+        experiment_index = len(glob(f"{args.results_dir}/*")) - 1
         model_string_name = args.model.replace("/", "-")  # e.g., SiT-XL/2 --> SiT-XL-2 (for naming folders)
         precision_suffix = f"-{args.precision}" if args.precision == "bf16" else ""
         experiment_name = f"{experiment_index:03d}-{model_string_name}-" \
@@ -283,6 +283,10 @@ def main(args):
         return 1.0 - (1.0 - final_lr_factor) * progress
 
     schedl = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda=linear_lr_lambda)
+
+    if args.ckpt is not None:
+        schedl.load_state_dict(state_dict["scheduler"])
+
     autocast_kwargs = dict(dtype=autocast_dtype, enabled=use_bf16)
     # Prepare models for training:
     update_ema(ema, model.module, decay=0)  # Ensure EMA is initialized with synced weights
@@ -376,6 +380,7 @@ def main(args):
                         "model": model.module.state_dict(),
                         "ema": ema.state_dict(),
                         "opt": opt.state_dict(),
+                        "scheduler": schedl.state_dict(),
                         "train_steps": train_steps,
                         "args": args,
                     }

@@ -134,7 +134,7 @@ class Transport:
         last_step_size=0.0,
     ):
         t0 = 0
-        t1 = 1 - 1/1000
+        t1 = 1 - 1 / 1000
         eps = train_eps if not eval else sample_eps
         if (type(self.path_sampler) in [path.VPCPlan]):
 

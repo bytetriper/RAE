@@ -341,7 +341,7 @@ class DiTwDDTHead(nn.Module):
         x = self.unpatchify(x)
         return x
 
-    def forward_with_cfg(self, x, t, y, cfg_scale, cfg_interval=((-1e4, -1e4)), interval_cfg: float = 0.0):
+    def forward_with_cfg(self, x, t, y, cfg_scale, cfg_interval=(0, 1)):
         """
         Forward pass of LightningDiT, but also batches the unconditional forward pass for classifier-free guidance.
         """
@@ -356,44 +356,31 @@ class DiTwDDTHead(nn.Module):
         eps, rest = model_out[:, :self.in_channels], model_out[:, self.in_channels:]
         # eps, rest = model_out[:, :3], model_out[:, 3:]
         cond_eps, uncond_eps = torch.split(eps, len(eps) // 2, dim=0)
-        t = t[0] # check if t < cfg_interval
-        in_interval = False
-        for i in range(len(cfg_interval)):
-            if t >= cfg_interval[i][0] and t < cfg_interval[i][1]:
-                #print(f't:{t}, cfg_interval: {cfg_interval[i]}')
-                if interval_cfg > 1.0:
-                    half_eps = uncond_eps + interval_cfg * (cond_eps - uncond_eps)
-                else:
-                    half_eps = cond_eps # only use conditional generation
-                in_interval = True
-                break
-        if not in_interval:
-            #print(f't:{t} not in cfg_interval')
-            half_eps = uncond_eps + cfg_scale * (cond_eps - uncond_eps)
+        guid_t_min, guid_t_max = cfg_interval
+        assert guid_t_min < guid_t_max, "cfg_interval should be (min, max) with min < max"
+        half_eps = torch.where(
+            ((t >= guid_t_min) & (t <= guid_t_max)).view(-1, *[1] * (len(cond_eps.shape) - 1)),
+            uncond_eps + cfg_scale * (cond_eps - uncond_eps), cond_eps
+        )
         eps = torch.cat([half_eps, half_eps], dim=0)
         return torch.cat([eps, rest], dim=1)
 
-    def forward_with_autoguidance(self, x, t, y, cfg_scale, additional_model_forward, cfg_interval=(-1e4, -1e4), interval_cfg: float = 0.0):
+    def forward_with_autoguidance(self, x, t, y, cfg_scale, additional_model_forward, cfg_interval=(0, 1)):
         """
         Forward pass of LightningDiT, but also contain the forward pass for the additional model
         """
-        half = x[: len(x) // 2] # cut the x by half, autoguidance does not need repeated input
-        t = t[: len(t) // 2]
-        y = y[: len(y) // 2]
-        model_out = self.forward(half, t, y)
-        ag_model_out = additional_model_forward(half, t, y)
+        model_out = self.forward(x, t, y)
+        ag_model_out = additional_model_forward(x, t, y)
         eps = model_out[:, :self.in_channels]
         ag_eps = ag_model_out[:, :self.in_channels]
-        t = t[0]
-        in_interval = False
-        for i in range(len(cfg_interval)):
-            if t >= cfg_interval[i][0] and t < cfg_interval[i][1]:
-                if interval_cfg > 1.0:
-                    eps = ag_eps + interval_cfg * (eps - ag_eps)
-                in_interval = True
-                break
-        if not in_interval:
-            eps = ag_eps + cfg_scale * (eps - ag_eps)
-        return torch.cat([eps, eps], dim=0)
+
+        guid_t_min, guid_t_max = cfg_interval
+        assert guid_t_min < guid_t_max, "cfg_interval should be (min, max) with min < max"
+        eps = torch.where(
+            ((t >= guid_t_min) & (t <= guid_t_max)).view(-1, *[1] * (len(eps.shape) - 1)),
+            ag_eps + cfg_scale * (eps - ag_eps), eps
+        )
+
+        return eps
 
             
