@@ -103,8 +103,23 @@ def main(mode, args):
     y_null = torch.tensor([1000] * n, device=device)
     y = torch.cat([y, y_null], 0)
     if args.cfg_scale > 1.0:
-        model_kwargs = dict(y=y, cfg_scale=args.cfg_scale)
-        model_fwd = model.forward_with_cfg
+        model_kwargs = dict(y=y, cfg_scale=args.cfg_scale, cfg_interval=(args.cfg_t_min, args.cfg_t_max))
+
+        if args.guid_model is not None:
+            guid_model = STAGE2_ARCHS[args.guid_model](
+                token_dim=768,  # Assuming the latent token dimension from stage 1
+                input_size=16,  # Assuming the latent size from stage 1 is 32
+            ).to(device)
+            assert args.guid_model_ckpt is not None, "Please provide a checkpoint for the guidance model."
+            # guid_ckpt = find_model('/home/willis/RAE/results/016-DDTS-Linear-velocity-None-bf16-acc1/checkpoints/0025000.pt', ema_only=True)
+            guid_ckpt = find_model(args.guid_model_ckpt, ema_only=True)
+            guid_model.load_state_dict(guid_ckpt)
+            guid_model.eval()  # important!
+            guid_fwd = guid_model.forward
+            model_kwargs['additional_model_forward'] = guid_fwd
+            model_fwd = model.forward_with_autoguidance
+        else:
+            model_fwd = model.forward_with_cfg
     else:
         model_kwargs = dict(y=y)
         model_fwd = model.forward
@@ -133,9 +148,13 @@ if __name__ == "__main__":
     assert mode in ["ODE", "SDE"], "Invalid mode. Please choose 'ODE' or 'SDE'"
     
     parser.add_argument("--model", type=str, default="DDTXL")
+    parser.add_argument("--guid-model", type=str, default=None)
+    parser.add_argument("--guid-model-ckpt", type=str, default=None)
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--cfg-scale", type=float, default=4.0)
+    parser.add_argument("--cfg-t-min", type=float, default=0.0)
+    parser.add_argument("--cfg-t-max", type=float, default=1.0)
     parser.add_argument("--num-sampling-steps", type=int, default=250)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--ckpt", type=str, default=None,

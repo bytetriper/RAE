@@ -16,7 +16,7 @@ class Dinov2withNorm(nn.Module):
         # Support both local paths and HuggingFace model IDs
         try:
             self.encoder = Dinov2WithRegistersModel.from_pretrained(dinov2_path, local_files_only=True)
-        except (OSError, ValueError):
+        except (OSError, ValueError, AttributeError):
             self.encoder = Dinov2WithRegistersModel.from_pretrained(dinov2_path, local_files_only=False)
         self.encoder.requires_grad_(False)
         if normalize:

@@ -16,6 +16,7 @@ import torch.distributed as dist
 from download import find_model
 from stage1 import RAE
 from stage2.model import STAGE2_ARCHS, DiTwDDTHead
+from torch.cuda.amp import autocast
 from transport import create_transport, Sampler
 from train_utils import parse_ode_args, parse_sde_args, parse_transport_args
 from tqdm import tqdm
@@ -62,6 +63,11 @@ def main(mode, args):
     torch.cuda.set_device(device)
     print(f"Starting rank={rank}, seed={seed}, world_size={dist.get_world_size()}.")
 
+    use_bf16 = args.precision == "bf16"
+    if use_bf16 and not torch.cuda.is_bf16_supported():
+        raise ValueError("Requested bf16 precision, but the current CUDA device does not support bfloat16.")
+    autocast_dtype = torch.bfloat16 if use_bf16 else None
+
     # TODO: setup DDTXL ckpt auto-downloads
     if args.ckpt is None:
         assert args.model == "DDTXL", "Only DDTXL models are available for auto-download."
@@ -85,6 +91,18 @@ def main(mode, args):
     state_dict = find_model(ckpt_path, ema_only=True)
     model.load_state_dict(state_dict)
     model.eval()  # important!
+
+    if args.guid_model is not None:
+        guid_model = STAGE2_ARCHS[args.guid_model](
+            token_dim=768,  # Assuming the latent token dimension from stage 1
+            input_size=16,  # Assuming the latent size from stage 1 is 32
+        ).to(device)
+        assert args.guid_model_ckpt is not None, "Please provide a checkpoint for the guidance model."
+        # guid_ckpt = find_model('models/DiTs/Dinov2/wReg_base/DDTS_ep20/stage2_model.pt', ema_only=True)
+        guid_ckpt = find_model(args.guid_model_ckpt, ema_only=True)
+        guid_model.load_state_dict(guid_ckpt)
+        guid_model.eval()  # important!
+
     # TODO: update RAE hardcoded load
     rae = RAE(
         encoder_cls='Dinov2withNorm',
@@ -138,12 +156,12 @@ def main(mode, args):
     if mode == "ODE":
         folder_name = f"{model_string_name}-{ckpt_string_name}-" \
                   f"cfg-{args.cfg_scale}-{args.per_proc_batch_size}-"\
-                  f"{mode}-{args.num_sampling_steps}-{args.sampling_method}"
+                  f"{mode}-{args.num_sampling_steps}-{args.sampling_method}-{args.precision}"
     elif mode == "SDE":
         folder_name = f"{model_string_name}-{ckpt_string_name}-" \
                     f"cfg-{args.cfg_scale}-{args.per_proc_batch_size}-"\
                     f"{mode}-{args.num_sampling_steps}-{args.sampling_method}-"\
-                    f"{args.diffusion_form}-{args.last_step}-{args.last_step_size}"
+                    f"{args.diffusion_form}-{args.last_step}-{args.last_step_size}-{args.precision}"
     sample_folder_dir = f"{args.sample_dir}/{folder_name}"
     if rank == 0:
         os.makedirs(sample_folder_dir, exist_ok=True)
@@ -167,27 +185,44 @@ def main(mode, args):
     pbar = tqdm(pbar) if rank == 0 else pbar
     total = 0
     
+    autocast_kwargs = dict(dtype=autocast_dtype, enabled=use_bf16)
+    latent_dtype = autocast_dtype if use_bf16 else torch.float32
+
     for i in pbar:
         # Sample inputs:
-        z = torch.randn(n, model.in_channels, latent_size, latent_size, device=device)
+        z = torch.randn(n, model.in_channels, latent_size, latent_size, dtype=latent_dtype, device=device)
         y = torch.randint(0, args.num_classes, (n,), device=device)
         
         # Setup classifier-free guidance:
         if using_cfg:
-            z = torch.cat([z, z], 0)
-            y_null = torch.tensor([1000] * n, device=device)
-            y = torch.cat([y, y_null], 0)
-            model_kwargs = dict(y=y, cfg_scale=args.cfg_scale)
-            model_fn = model.forward_with_cfg
+            
+            if args.guid_model is not None:
+                guid_fwd = guid_model.forward
+                model_fn = model.forward_with_autoguidance
+                model_kwargs = dict(
+                    y=y, cfg_scale=args.cfg_scale,
+                    cfg_interval=(args.cfg_t_min, args.cfg_t_max),
+                    additional_model_forward=guid_fwd
+                )
+            else:
+                z = torch.cat([z, z], 0)
+                y_null = torch.tensor([1000] * n, device=device)
+                y = torch.cat([y, y_null], 0)
+                model_kwargs = dict(
+                    y=y, cfg_scale=args.cfg_scale,
+                    cfg_interval=(args.cfg_t_min, args.cfg_t_max),
+                )
+                model_fn = model.forward_with_cfg
         else:
             model_kwargs = dict(y=y)
             model_fn = model.forward
 
-        samples = sample_fn(z, model_fn, **model_kwargs)[-1]
-        if using_cfg:
-            samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
+        with autocast(**autocast_kwargs):
+            samples = sample_fn(z, model_fn, **model_kwargs)[-1]
+            if using_cfg and args.guid_model is None:
+                samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
 
-        samples = rae.decode(samples).clamp(0, 1).mul(255).permute(0, 2, 3, 1).to("cpu", dtype=torch.uint8).numpy()
+            samples = rae.decode(samples).clamp(0, 1).mul(255).permute(0, 2, 3, 1).to("cpu", dtype=torch.uint8).numpy()
         #samples = torch.clamp(127.5 * samples + 128.0, 0, 255).permute(0, 2, 3, 1).to("cpu", dtype=torch.uint8).numpy()
 
         # Save samples to disk as individual .png files
@@ -220,14 +255,19 @@ if __name__ == "__main__":
     assert mode in ["ODE", "SDE"], "Invalid mode. Please choose 'ODE' or 'SDE'"
 
     parser.add_argument("--model", type=str, default="DDTXL")
+    parser.add_argument("--guid-model", type=str, default=None)
+    parser.add_argument("--guid-model-ckpt", type=str, default=None)
     parser.add_argument("--sample-dir", type=str, default="samples")
     parser.add_argument("--per-proc-batch-size", type=int, default=4)
     parser.add_argument("--num-fid-samples", type=int, default=50_000)
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--cfg-scale",  type=float, default=1.0)
+    parser.add_argument("--cfg-t-min", type=float, default=0.0)
+    parser.add_argument("--cfg-t-max", type=float, default=1.0)
     parser.add_argument("--num-sampling-steps", type=int, default=250)
     parser.add_argument("--global-seed", type=int, default=0)
+    parser.add_argument("--precision", type=str, choices=["fp32", "bf16"], default="fp32")
     parser.add_argument("--tf32", action=argparse.BooleanOptionalAction, default=True,
                         help="By default, use TF32 matmuls. This massively accelerates sampling on Ampere GPUs.")
     parser.add_argument("--ckpt", type=str, default=None,
