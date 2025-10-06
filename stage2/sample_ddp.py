@@ -190,34 +190,34 @@ def main(mode, args):
 
     for i in pbar:
         # Sample inputs:
-        z = torch.randn(n, model.in_channels, latent_size, latent_size, dtype=latent_dtype, device=device)
-        y = torch.randint(0, args.num_classes, (n,), device=device)
-        
-        # Setup classifier-free guidance:
-        if using_cfg:
-            
-            if args.guid_model is not None:
-                guid_fwd = guid_model.forward
-                model_fn = model.forward_with_autoguidance
-                model_kwargs = dict(
-                    y=y, cfg_scale=args.cfg_scale,
-                    cfg_interval=(args.cfg_t_min, args.cfg_t_max),
-                    additional_model_forward=guid_fwd
-                )
-            else:
-                z = torch.cat([z, z], 0)
-                y_null = torch.tensor([1000] * n, device=device)
-                y = torch.cat([y, y_null], 0)
-                model_kwargs = dict(
-                    y=y, cfg_scale=args.cfg_scale,
-                    cfg_interval=(args.cfg_t_min, args.cfg_t_max),
-                )
-                model_fn = model.forward_with_cfg
-        else:
-            model_kwargs = dict(y=y)
-            model_fn = model.forward
-
         with autocast(**autocast_kwargs):
+            z = torch.randn(n, model.in_channels, latent_size, latent_size, device=device)
+            y = torch.randint(0, args.num_classes, (n,), device=device)
+            
+            # Setup classifier-free guidance:
+            if using_cfg:
+                
+                if args.guid_model is not None:
+                    guid_fwd = guid_model.forward
+                    model_fn = model.forward_with_autoguidance
+                    model_kwargs = dict(
+                        y=y, cfg_scale=args.cfg_scale,
+                        cfg_interval=(args.cfg_t_min, args.cfg_t_max),
+                        additional_model_forward=guid_fwd
+                    )
+                else:
+                    z = torch.cat([z, z], 0)
+                    y_null = torch.tensor([1000] * n, device=device)
+                    y = torch.cat([y, y_null], 0)
+                    model_kwargs = dict(
+                        y=y, cfg_scale=args.cfg_scale,
+                        cfg_interval=(args.cfg_t_min, args.cfg_t_max),
+                    )
+                    model_fn = model.forward_with_cfg
+            else:
+                model_kwargs = dict(y=y)
+                model_fn = model.forward
+
             samples = sample_fn(z, model_fn, **model_kwargs)[-1]
             if using_cfg and args.guid_model is None:
                 samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
