@@ -27,6 +27,7 @@ import math
 import argparse
 import sys
 import math
+from typing import Tuple, Callable
 
 
 def create_npz_from_sample_folder(sample_dir, num=50_000):
@@ -45,6 +46,58 @@ def create_npz_from_sample_folder(sample_dir, num=50_000):
     print(f"Saved .npz file to {npz_path} [shape={samples.shape}].")
     return npz_path
 
+def build_label_sampler(
+    sampling_mode: str,
+    num_classes: int,
+    num_fid_samples: int,
+    total_samples: int,
+    samples_needed_this_device: int,
+    batch_size: int,
+    device: torch.device,
+    rank: int,
+    iterations: int,
+    seed: int,
+) -> Callable[[int], torch.Tensor]:
+    """Create a callable that returns a batch of labels for the given step index."""
+
+    if sampling_mode == "random":
+        def random_sampler(_step_idx: int) -> torch.Tensor:
+            return torch.randint(0, num_classes, (batch_size,), device=device)
+
+        return random_sampler
+
+    if sampling_mode != "equal":
+        raise ValueError(f"Unknown label sampling mode: {sampling_mode}")
+
+    if num_fid_samples % num_classes != 0:
+        raise ValueError(
+            f"Equal label sampling requires num_fid_samples ({num_fid_samples}) to be divisible by num_classes ({num_classes})."
+        )
+
+    labels_per_class = num_fid_samples // num_classes
+    base_pool = torch.arange(num_classes, dtype=torch.long).repeat_interleave(labels_per_class)
+
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+    permutation = torch.randperm(base_pool.numel(), generator=generator)
+    base_pool = base_pool[permutation]
+
+    if total_samples > num_fid_samples:
+        tail = torch.randint(0, num_classes, (total_samples - num_fid_samples,), generator=generator)
+        global_pool = torch.cat([base_pool, tail], dim=0)
+    else:
+        global_pool = base_pool
+
+    start = rank * samples_needed_this_device
+    end = start + samples_needed_this_device
+    device_pool = global_pool[start:end]
+    device_pool = device_pool.view(iterations, batch_size)
+
+    def equal_sampler(step_idx: int) -> torch.Tensor:
+        labels = device_pool[step_idx]
+        return labels.to(device)
+
+    return equal_sampler
 
 def main(mode, args):
     """
@@ -186,13 +239,23 @@ def main(mode, args):
     total = 0
     
     autocast_kwargs = dict(dtype=autocast_dtype, enabled=use_bf16)
-    latent_dtype = autocast_dtype if use_bf16 else torch.float32
-
+    label_sampler = build_label_sampler(
+        args.label_sampling,
+        args.num_classes,
+        args.num_fid_samples,
+        total_samples,
+        samples_needed_this_gpu,
+        n,
+        device,
+        rank,
+        iterations,
+        args.global_seed,
+    )
     for i in pbar:
         # Sample inputs:
         with autocast(**autocast_kwargs):
             z = torch.randn(n, model.in_channels, latent_size, latent_size, device=device)
-            y = torch.randint(0, args.num_classes, (n,), device=device)
+            y = label_sampler(i)
             
             # Setup classifier-free guidance:
             if using_cfg:
@@ -270,6 +333,13 @@ if __name__ == "__main__":
     parser.add_argument("--precision", type=str, choices=["fp32", "bf16"], default="fp32")
     parser.add_argument("--tf32", action=argparse.BooleanOptionalAction, default=True,
                         help="By default, use TF32 matmuls. This massively accelerates sampling on Ampere GPUs.")
+    parser.add_argument(
+        "--label-sampling",
+        type=str,
+        choices=["random", "equal"],
+        default="random",
+        help="Choose how to sample class labels when generating images.",
+    )
     parser.add_argument("--ckpt", type=str, default=None,
                         help="Optional path to a SiT checkpoint (default: auto-download a pre-trained SiT-XL/2 model).")
     parse_transport_args(parser)
