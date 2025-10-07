@@ -144,6 +144,12 @@ Once sampling finishes, rank 0 aggregates the PNGs into `samples/<run>.npz`.
 You can pass that file to downstream FID tooling (e.g., the ADM evaluation
 scripts).
 
+Autoguidance is also supported. To enable autoguidance, simply pass in:
+
+- `--cfg-scale`: the guidance scale
+- `--guid-model`: model size used for guiding generation
+- `--guid-model-ckpt`: the path to the checkpoint of the guidance model
+
 ## Tips
 
 - Stage 2 assumes Stage 1 assets are available locally; verify the paths in
