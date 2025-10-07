@@ -137,7 +137,7 @@ Example command to draw 50k ODE samples on 8 GPUs:
 
 ```bash
 torchrun --standalone --nnodes=1 --nproc_per_node=4 \
-  stage2/sample_ddp.py ODE --cfg-scale 1.0 --ckpt models/DiTs/Dinov2/wReg_base/DDTXL/stage2_model.pt --num-sampling-steps 50 --sampling-method euler --per-proc-batch-size 8
+  stage2/sample_ddp.py ODE --cfg-scale 1.0 --ckpt models/DiTs/Dinov2/wReg_base/DDTXL/stage2_model.pt --num-sampling-steps 50 --sampling-method euler --per-proc-batch-size 8 --label-sampling equal
 ```
 
 Once sampling finishes, rank 0 aggregates the PNGs into `samples/<run>.npz`.
