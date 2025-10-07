@@ -66,7 +66,7 @@ class sde:
     
         return sampler
 
-    def sample(self, init, model, **model_kwargs):
+    def sample(self, init, model, **model_kwargs) -> tuple[th.Tensor]:
         """forward loop of sde"""
         x = init
         mean_x = init 
@@ -103,7 +103,7 @@ class ode:
         self.rtol = rtol
         self.sampler_type = sampler_type
 
-    def sample(self, x, model, **model_kwargs):
+    def sample(self, x, model, **model_kwargs) -> tuple[th.Tensor]:
         
         device = x[0].device if isinstance(x, tuple) else x.device
         def _fn(t, x):

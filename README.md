@@ -76,68 +76,72 @@ Then it should be directly runnable.
 
 ## Distributed Training
 
-Stage 2 training is implemented in `stage2/train.py` and expects to be launched
-with `torchrun` (PyTorch DDP). Key options:
+Stage 2 training now lives in `src/train.py` and is configured via a YAML file
+(see `configs/training`). Launch it with `torchrun` (PyTorch DDP). Key CLI
+switches:
 
+- `--config`: path to a config describing Stage 1/2 models, transport, sampler,
+  guidance, and training hyperparameters.
 - `--data-path`: root of the training images (ImageFolder format).
 - `--results-dir`: directory where experiment logs/checkpoints are written.
-- `--global-batch-size`: total batch across all GPUs and accumulation steps.
-- `--grad-accum-steps`: gradient accumulation factor (default 1).
+- `--image-size`: input resolution; must match the Stage 1 encoder.
 - `--precision {fp32,bf16}`: enable bfloat16 autocast on supported GPUs.
+- `--wandb`: opt-in to Weights & Biases logging (expects `ENTITY`/`PROJECT`).
+- `--ckpt`: optional checkpoint to resume from.
+- `--global-seed`: override `training.global_seed` from the config file.
 
-Example: 8 GPUs, global batch 1024, gradient accumulation 1, bf16 enabled:
+Global batch size, gradient accumulation, LR schedule, EMA decay, etc. are
+pulled from the config's `training` block, so edit those YAML files to change
+defaults (examples live under `configs/training/ImageNet256/`).
+
+Example: single node, 4 GPUs, bf16 enabled:
 
 ```bash
-torchrun --nproc_per_node=8 stage2/train.py \
-  --data-path <path-to-imagenet-train-split> \
-  --results-dir results \
-  --model DDTS \
-  --global-batch-size 1024 \
-  --grad-accum-steps 1 \
-  --precision bf16 \
-  --ema-decay 0.9995 \
-  --wandb
+torchrun --standalone --nnodes=1 --nproc_per_node=4 \
+  src/train.py --config configs/training/ImageNet256/DiTDH-S_DINOv2-B.yaml \
+  --data-path /data/boyang/imagenet/train --precision bf16
 ```
 
 Training checkpoints are written to `results/<run-name>/checkpoints/`. The run
-name will automatically include `-bf16` when mixed-precision is enabled.
-
-Current selections for `--model` include `DDTS, DDTXL, DiTXL`
+name automatically encodes precision (`-bf16`) and other run metadata.
 
 ## Single-GPU Sampling
 
-`stage2/sample.py` generates images on a single GPU/CPU. You must choose an
-ODE or SDE sampler as the first positional argument. Useful flags:
+`src/sample.py` generates images on a single GPU/CPU using the same config
+schema as training. Provide a config that defines Stage 1/2, transport, sampler
+mode, and optional guidance. Useful flags:
 
-- `--ckpt`: path to a Stage 2 checkpoint (defaults to auto-downloading a
-  pretrained SiT-XL/2 model).
-- `--cfg-scale`: classifier-free guidance scale (default 4.0).
-- `--num-sampling-steps`: sampler steps.
-- Transport/solver flags come from `train_utils.parse_transport_args` and the
-  respective ODE/SDE parsers.
+- `--config`: path to the sampling config (see `configs/models` or training configs).
+- `--seed`: random seed for latent sampling (default 0).
 
-Example ODE sampling run that saves `sample.png`:
+The script saves the decoded grid to `sample.png` in the working directory.
+Example:
 
 ```bash
-python stage2/sample.py ODE --cfg-scale 1.0 --ckpt models/DiTs/Dinov2/wReg_base/DDTXL/stage2_model.pt --num-sampling-steps 50 --sampling-method euler
+python src/sample.py --config configs/models/DiTDH-XL_DINOv2-B_decXL.yaml --seed 42
 ```
 
 ## Distributed Sampling for Evaluation
 
-`stage2/sample_ddp.py` parallelises sampling across multiple GPUs and writes
+`src/sample_ddp.py` parallelises sampling across multiple GPUs and writes
 PNG files plus an `.npz` payload suitable for FID evaluation. Launch it with
-`torchrun` the same way as training. Important arguments:
+`torchrun`, reusing the same config structure as `sample.py`.
 
+Key CLI switches:
+
+- `--config`: path to a sampling config.
 - `--sample-dir`: base directory for sample PNGs and the resulting `.npz`.
 - `--per-proc-batch-size`: batch size per GPU.
 - `--num-fid-samples`: number of images to generate (default 50k).
-- `--tf32/--no-tf32`: toggle TensorFloat-32 matmuls.
+- `--precision {fp32,bf16}` and `--tf32/--no-tf32`: numerical controls.
+- `--global-seed`: per-rank seeding (defaults to config value or 0).
 
-Example command to draw 50k ODE samples on 8 GPUs:
+Example command to draw 50k samples on 4 GPUs:
 
 ```bash
 torchrun --standalone --nnodes=1 --nproc_per_node=4 \
-  stage2/sample_ddp.py ODE --cfg-scale 1.0 --ckpt models/DiTs/Dinov2/wReg_base/DDTXL/stage2_model.pt --num-sampling-steps 50 --sampling-method euler --per-proc-batch-size 8 --label-sampling equal
+  src/sample_ddp.py --config configs/models/DiTDH-XL_DINOv2-B_decXL.yaml \
+  --sample-dir samples --per-proc-batch-size 8 --num-fid-samples 50000
 ```
 
 Once sampling finishes, rank 0 aggregates the PNGs into `samples/<run>.npz`.
@@ -153,7 +157,7 @@ Autoguidance is also supported. To enable autoguidance, simply pass in:
 ## Tips
 
 - Stage 2 assumes Stage 1 assets are available locally; verify the paths in
-  `stage2/train.py` and `stage2/sample*.py` before launching jobs.
-- If your dataset folder is large, set `--num-workers` to fully utilise CPU
-  prefetch.
+  `src/train.py` and `src/sample*.py` before launching jobs.
+- If your dataset folder is large, bump `training.num_workers` in the config to
+  fully utilise CPU prefetch.
 - To resume training from a checkpoint, pass `--ckpt <path>` to `train.py`.
