@@ -220,11 +220,11 @@ def main():
     if args.compile:
         try:
             rae.encode = torch.compile(rae.encode)
-        except:
+        except Exception:
             print('RAE ENCODE compile meets error, falling back to no compile')
         try:
             model.forward = torch.compile(model.forward)
-        except:
+        except Exception:
             print('MODEL FORWARD compile meets error, falling back to no compile')
     else:
         raise NotImplementedError('ARGS>COMPILE')
