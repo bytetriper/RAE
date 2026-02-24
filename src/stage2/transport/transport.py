@@ -194,7 +194,7 @@ class Transport:
         - x1: datapoint
         - model_kwargs: additional arguments for the model
         """
-        if model_kwargs == None:
+        if model_kwargs is None:
             model_kwargs = {}
         
         t, x0, x1 = self.sample(x1)
