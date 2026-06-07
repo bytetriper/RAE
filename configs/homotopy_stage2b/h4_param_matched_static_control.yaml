@@ -1,0 +1,44 @@
+# Homotopy Stage 2b — H4: Parameter-matched static control
+# Clean target: Norm(z_sem + 1.0 * z_det)  (static, alpha=1.0)
+# Purpose: kill the objection "homotopy won because of more parameters".
+#
+# Since Stage 2b uses Pattern A (target replacement only), H2/H3 have
+# IDENTICAL parameter counts to H1 and H4. This is documented explicitly.
+#
+# H4 uses alpha=1.0 (full detail injection without homotopy schedule) to
+# test whether simply maximising static detail injection beats homotopy.
+# This is a more stringent baseline than H1 (alpha=0.5).
+
+variant: "H4"
+alpha: 1.0        # full static detail injection — stronger than H1
+gamma: 1          # unused for H4
+detail_layer: 4   # locked from Stage 2a STRONG_GO result
+
+# Model (DiTDH-S, same for all variants — parameter count is identical)
+hidden_size_enc: 384
+hidden_size_dec: 2048
+depth_enc: 12
+depth_dec: 2
+num_heads_enc: 6
+num_heads_dec: 16
+
+# Training
+n_steps: 20000
+batch_size: 128
+lr: 1.0e-4
+weight_decay: 0.0
+warmup_steps: 1000
+clip_grad: 1.0
+ema_decay: 0.9999
+precision: "bf16"
+
+# Evaluation
+val_every: 2000
+sample_every: 4000
+ckpt_every: 5000
+num_val_steps: 20
+sample_steps: 50
+n_sample_classes: 8
+
+# Data
+max_val_images: 1000

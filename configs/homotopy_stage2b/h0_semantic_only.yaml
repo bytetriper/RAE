@@ -1,0 +1,37 @@
+# Homotopy Stage 2b — H0: Semantic-only baseline
+# Clean target: z_sem (no detail stream)
+# Purpose: baseline RAE semantic latent diffusion
+
+variant: "H0"
+alpha: 0.5
+gamma: 1          # unused for H0
+detail_layer: 4   # locked from Stage 2a STRONG_GO result
+
+# Model (DiTDH-S, same for all variants)
+hidden_size_enc: 384
+hidden_size_dec: 2048
+depth_enc: 12
+depth_dec: 2
+num_heads_enc: 6
+num_heads_dec: 16
+
+# Training (20k step screen)
+n_steps: 20000
+batch_size: 128
+lr: 1.0e-4
+weight_decay: 0.0
+warmup_steps: 1000
+clip_grad: 1.0
+ema_decay: 0.9999
+precision: "bf16"
+
+# Evaluation
+val_every: 2000
+sample_every: 4000
+ckpt_every: 5000
+num_val_steps: 20
+sample_steps: 50
+n_sample_classes: 8
+
+# Data
+max_val_images: 1000
