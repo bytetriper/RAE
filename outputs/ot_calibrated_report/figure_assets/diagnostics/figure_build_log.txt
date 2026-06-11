@@ -1,0 +1,12 @@
+run_dir: /storage/nada/RAE/runs/runai/20260604_002421__rae-sample-classify-10k__a4d18c4
+out_dir: /storage/nada/RAE/runs/runai/20260604_002421__rae-sample-classify-10k__a4d18c4/outputs/ot_calibrated_report/figure_assets
+seed: 123
+paired_ordering: True
+labels_present: True
+plots: 18
+image_grids: 4
+spatial_maps: 6
+table_files: 10
+skipped_optional_figures: none
+manifest: /storage/nada/RAE/runs/runai/20260604_002421__rae-sample-classify-10k__a4d18c4/outputs/ot_calibrated_report/figure_assets/manifest.json
+latex_export: /storage/nada/RAE/runs/runai/20260604_002421__rae-sample-classify-10k__a4d18c4/outputs/ot_calibrated_report/figure_assets/latex_export

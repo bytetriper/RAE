@@ -1,0 +1,5 @@
+variant,ratio_name,ratio
+pooled_semantic,global_shuffle_mse / paired_mse,14.433232307434082
+pooled_semantic,class_shuffle_mse / paired_mse,7.523177623748779
+flattened_spatial_jl256,global_shuffle_mse / paired_mse,6.119822978973389
+flattened_spatial_jl256,class_shuffle_mse / paired_mse,4.528674602508545
