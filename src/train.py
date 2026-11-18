@@ -8,6 +8,7 @@ import argparse
 import logging
 import math
 import os
+import platform
 from collections import defaultdict, OrderedDict
 import torch
 # the first flag below was False when we tested this script but True makes A100 training a lot faster:
@@ -226,13 +227,20 @@ def main():
             model.forward = torch.compile(model.forward)
         except:
             print('MODEL FORWARD compile meets error, falling back to no compile')
+    elif platform.system() == "Windows":
+        # torch.compile needs Triton, which is an optional extra on Windows
+        # (triton-windows). Eager is slower but numerically equivalent.
+        print('Running without torch.compile (eager mode).')
     else:
         raise NotImplementedError('ARGS>COMPILE')
     ema_model = deepcopy(model).to(device)
     ema_model.requires_grad_(False)
     ema_model.eval()
     model.requires_grad_(True) # train stage2 model
-    ddp_model = DDP(model, device_ids=[device.index], broadcast_buffers=False, find_unused_parameters=False)
+    if world_size > 1:
+        ddp_model = DDP(model, device_ids=[device.index], broadcast_buffers=False, find_unused_parameters=False)
+    else:
+        ddp_model = SingleProcessWrapper(model)
     # ddp_model = torch.compile(ddp_model) # fix shape compile, see if it works
     model = ddp_model.module
     ddp_model.train()
