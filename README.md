@@ -49,6 +49,45 @@ Please refer to the [deprecated branch](https://github.com/bytetriper/RAE/tree/d
    uv pip install -r requirements.txt
    ```
 
+### Windows
+
+Linux remains the reference platform; the notes below cover what differs on
+Windows. Single-GPU training, statistics calculation and sampling work. **Multi-GPU
+training does not**, for the reason given below.
+
+1. **Launching.** NCCL is Linux-only, so `setup_distributed` selects the `gloo`
+   backend on Windows automatically. Override with the `DIST_BACKEND` environment
+   variable if needed.
+
+2. **Multi-GPU is unavailable.** The Windows PyTorch wheels cannot run collective
+   operations on CUDA tensors under `gloo` — a single `all_reduce` on a CUDA tensor
+   terminates the process. Consequently `DistributedDataParallel` is only applied
+   when more than one process takes part; a single-process run uses the model
+   directly, which is equivalent and avoids the gradient all-reduce entirely. Until
+   PyTorch ships a CUDA-capable backend for Windows, use one GPU or run under WSL2.
+
+3. **`torchrun` rendezvous.** The Windows wheels are built without libuv, which
+   `torchrun --standalone` requires for its c10d store, and the `USE_LIBUV=0`
+   escape hatch does not reach that code path. For a single GPU you can skip
+   `torchrun` and set the rendezvous variables yourself:
+
+   ```bat
+   set RANK=0
+   set WORLD_SIZE=1
+   set LOCAL_RANK=0
+   set MASTER_ADDR=127.0.0.1
+   set MASTER_PORT=29500
+   set USE_LIBUV=0
+   python src/train_stage1.py --config <config> ...
+   ```
+
+   `init_process_group` honours `USE_LIBUV=0` on this `env://` path.
+
+4. **`torch.compile` / Triton is optional.** Triton is not part of the standard
+   Windows PyTorch install; it is available separately as `triton-windows`. Without
+   it, omit `--compile` and `src/train.py` runs eagerly — slower, but numerically
+   equivalent. On other platforms `--compile` remains required.
+
 ## Data & Model Preparation
 
 ### Download Pre-trained Models

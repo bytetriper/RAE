@@ -230,11 +230,17 @@ def main():
     # only train decoder
     rae.encoder.requires_grad_(False)
     rae.decoder.requires_grad_(True)
-    ddp_model = DDP(rae, device_ids=[device.index], broadcast_buffers=False, find_unused_parameters=False)  # type: ignore[arg-type]
+    if world_size > 1:
+        ddp_model = DDP(rae, device_ids=[device.index], broadcast_buffers=False, find_unused_parameters=False)  # type: ignore[arg-type]
+    else:
+        ddp_model = SingleProcessWrapper(rae)
     rae = ddp_model.module
     decoder = ddp_model.module.decoder
     discriminator, disc_aug = build_discriminator(disc_cfg, device)
-    ddp_disc = DDP(discriminator, device_ids=[device.index], broadcast_buffers=False, find_unused_parameters=False)  # type: ignore[arg-type]
+    if world_size > 1:
+        ddp_disc = DDP(discriminator, device_ids=[device.index], broadcast_buffers=False, find_unused_parameters=False)  # type: ignore[arg-type]
+    else:
+        ddp_disc = SingleProcessWrapper(discriminator)
     discriminator = ddp_disc.module
     disc_scheduler: LambdaLR | None = None
     disc_sched_msg: Optional[str] = None

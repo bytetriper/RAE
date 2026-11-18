@@ -36,6 +36,7 @@ from tqdm import tqdm
 from stage1 import RAE
 from utils.model_utils import instantiate_from_config
 from utils.train_utils import parse_configs
+from utils.dist_utils import default_backend
 
 
 def center_crop_arr(pil_image: Image.Image, image_size: int) -> Image.Image:
@@ -146,7 +147,8 @@ def _sync_mean_var_across_ranks(
 
     Uses only all_reduce (no all_gather).
     """
-    if not dist.is_initialized():
+    if not dist.is_initialized() or dist.get_world_size() == 1:
+        # With a single rank the reduction below is the identity.
         return mean_r, var_r
 
     world_size = dist.get_world_size()
@@ -189,7 +191,7 @@ def main(args: argparse.Namespace) -> None:
     torch.backends.cudnn.allow_tf32 = args.tf32
     torch.set_grad_enabled(False)
 
-    dist.init_process_group("nccl")
+    dist.init_process_group(default_backend())
     rank = dist.get_rank()
     world_size = dist.get_world_size()
 

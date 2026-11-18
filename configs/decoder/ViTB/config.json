@@ -21,7 +21,7 @@
   "num_attention_heads": 12,
   "num_channels": 3,
   "num_hidden_layers": 12,
-  "patch_size": "SHOULD BE RELOADED",
+  "patch_size": 16,
   "qkv_bias": true,
   "torch_dtype": "float32",
   "transformers_version": "4.42.3"
